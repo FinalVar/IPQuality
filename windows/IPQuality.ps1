@@ -28,6 +28,67 @@ Import-Module $modulePath -Force
 if ($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
     try {
         $Host.UI.RawUI.WindowTitle = if ($Lite) { 'IPQuality Lite - 正在检测' } else { 'IPQuality Full - 正在检测' }
+        if (-not ('IPQuality.NativeConsole' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace IPQuality {
+    public static class NativeConsole {
+        [StructLayout(LayoutKind.Sequential)]
+        public struct Coord {
+            public short X;
+            public short Y;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct FontInfo {
+            public uint Size;
+            public uint Font;
+            public Coord FontSize;
+            public int FontFamily;
+            public int FontWeight;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+            public string FaceName;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GetStdHandle(int handle);
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool SetCurrentConsoleFontEx(
+            IntPtr output,
+            bool maximumWindow,
+            ref FontInfo info
+        );
+
+        public static bool SetFont(short height) {
+            var info = new FontInfo {
+                Size = (uint)Marshal.SizeOf<FontInfo>(),
+                FontSize = new Coord { X = 0, Y = height },
+                FontFamily = 54,
+                FontWeight = 400,
+                FaceName = "Consolas"
+            };
+            return SetCurrentConsoleFontEx(GetStdHandle(-11), false, ref info);
+        }
+    }
+}
+'@
+        }
+        [IPQuality.NativeConsole]::SetFont(14) | Out-Null
+
+        $maximum = $Host.UI.RawUI.MaxPhysicalWindowSize
+        $targetWidth = [Math]::Min(74, $maximum.Width)
+        $targetHeight = [Math]::Min(49, $maximum.Height)
+        $buffer = $Host.UI.RawUI.BufferSize
+        $buffer.Width = [Math]::Max($buffer.Width, $targetWidth)
+        $buffer.Height = [Math]::Max($buffer.Height, 200)
+        $Host.UI.RawUI.BufferSize = $buffer
+        $window = $Host.UI.RawUI.WindowSize
+        $window.Width = $targetWidth
+        $window.Height = $targetHeight
+        $Host.UI.RawUI.WindowSize = $window
     }
     catch {
     }

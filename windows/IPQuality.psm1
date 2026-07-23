@@ -1,7 +1,7 @@
 #Requires -Version 7.2
 Set-StrictMode -Version Latest
 
-$script:IPQualityVersion = '0.3.0'
+$script:IPQualityVersion = '0.3.1'
 $script:UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
 $script:SourceOrder = @(
     'IPinfo',
@@ -2017,7 +2017,6 @@ function Write-IPQBadge {
 
 function Write-IPQSectionTitle {
     param([Parameter(Mandatory)][string]$Text)
-    Write-Host ''
     Write-Host $Text -ForegroundColor White
 }
 
@@ -2035,9 +2034,10 @@ function Write-IPQMatrixHeader {
     param(
         [Parameter(Mandatory)][string]$Label,
         [Parameter(Mandatory)][object[]]$Values,
-        [ValidateRange(5, 16)][int]$CellWidth
+        [ValidateRange(5, 16)][int]$CellWidth,
+        [ValidateRange(5, 16)][int]$LabelWidth = 9
     )
-    Write-Host -NoNewline (Format-IPQFixedWidth -Text $Label -Width 9) -ForegroundColor Cyan
+    Write-Host -NoNewline (Format-IPQFixedWidth -Text $Label -Width $LabelWidth) -ForegroundColor Cyan
     foreach ($value in $Values) {
         Write-Host -NoNewline (Format-IPQFixedWidth -Text $value -Width $CellWidth -Align Center) -ForegroundColor DarkCyan
     }
@@ -2048,12 +2048,47 @@ function Write-IPQMatrixBadges {
     param(
         [Parameter(Mandatory)][string]$Label,
         [Parameter(Mandatory)][object[]]$Values,
-        [ValidateRange(5, 16)][int]$CellWidth
+        [ValidateRange(5, 16)][int]$CellWidth,
+        [ValidateRange(5, 16)][int]$LabelWidth = 9
     )
-    Write-Host -NoNewline (Format-IPQFixedWidth -Text $Label -Width 9) -ForegroundColor Cyan
+    Write-Host -NoNewline (Format-IPQFixedWidth -Text $Label -Width $LabelWidth) -ForegroundColor Cyan
     foreach ($value in $Values) {
-        Write-IPQBadge -Value $value -Width ($CellWidth - 1)
-        Write-Host -NoNewline ' '
+        $text = Format-IPQCell $value
+        if ($text -in @('-', '不可用', '未知')) {
+            Write-Host -NoNewline (Format-IPQFixedWidth -Text $text -Width $CellWidth -Align Center) -ForegroundColor DarkGray
+            continue
+        }
+        $badgeWidth = [Math]::Min(
+            $CellWidth - 1,
+            [Math]::Max(4, (Get-IPQDisplayWidth $text) + 2)
+        )
+        $leftPadding = [Math]::Floor(($CellWidth - $badgeWidth) / 2)
+        $rightPadding = $CellWidth - $badgeWidth - $leftPadding
+        Write-Host -NoNewline (' ' * $leftPadding)
+        Write-IPQBadge -Value $text -Width $badgeWidth
+        Write-Host -NoNewline (' ' * $rightPadding)
+    }
+    Write-Host ''
+}
+
+function Write-IPQMatrixTexts {
+    param(
+        [Parameter(Mandatory)][string]$Label,
+        [Parameter(Mandatory)][object[]]$Values,
+        [ValidateRange(5, 16)][int]$CellWidth,
+        [ValidateRange(5, 16)][int]$LabelWidth = 9
+    )
+    Write-Host -NoNewline (Format-IPQFixedWidth -Text $Label -Width $LabelWidth) -ForegroundColor Cyan
+    foreach ($value in $Values) {
+        $text = Format-IPQCell $value
+        $color = switch ($text) {
+            '是' { 'Red' }
+            '否' { 'Green' }
+            '无' { 'Green' }
+            '-' { 'DarkGray' }
+            default { 'Green' }
+        }
+        Write-Host -NoNewline (Format-IPQFixedWidth -Text $text -Width $CellWidth -Align Center) -ForegroundColor $color
     }
     Write-Host ''
 }
@@ -2062,22 +2097,95 @@ function Write-IPQRiskBar {
     param([Parameter(Mandatory)][object]$Source)
 
     $score = [Math]::Max(0, [Math]::Min(100, [double]$Source.Score))
-    $filled = [Math]::Round($score / 5)
+    $sourceName = "$($Source.Name)"
+    $displayName = switch ($sourceName) {
+        'Scamalytics' { 'SCAMALYTICS' }
+        default { $sourceName }
+    }
     $riskLevel = Get-IPQValue $Source 'RiskLevel' ''
     if (-not $riskLevel) {
-        $riskLevel = Get-IPQRiskLevel -SourceName $Source.Name -Score $score
+        $riskLevel = Get-IPQRiskLevel -SourceName $sourceName -Score $score
     }
-    $barColor = Get-IPQBadgeColor $riskLevel
-    Write-Host -NoNewline (Format-IPQFixedWidth -Text "$($Source.Name)：" -Width 17) -ForegroundColor Cyan
-    if ($filled -gt 0) {
-        Write-Host -NoNewline ('█' * $filled) -ForegroundColor $barColor
+
+    $scaleScore = $score
+    $lowBoundary = 33.0
+    $mediumBoundary = 66.0
+    $maximumBoundary = 100.0
+    switch ($sourceName) {
+        'IP2Location' {
+            $lowBoundary = 33
+            $mediumBoundary = 66
+            $maximumBoundary = 99
+        }
+        'Scamalytics' {
+            $lowBoundary = 20
+            $mediumBoundary = 60
+            $maximumBoundary = 100
+        }
+        'ipapi' {
+            $scaleScore = $score * 100
+            $lowBoundary = 85
+            $mediumBoundary = 300
+            $maximumBoundary = 10000
+        }
+        'AbuseIPDB' {
+            $lowBoundary = 25
+            $mediumBoundary = 25
+            $maximumBoundary = 100
+        }
+        'IPQS' {
+            $lowBoundary = 75
+            $mediumBoundary = 85
+            $maximumBoundary = 100
+        }
     }
-    if ($filled -lt 20) {
-        Write-Host -NoNewline ('░' * (20 - $filled)) -ForegroundColor DarkGray
+
+    if ($scaleScore -ge $mediumBoundary) {
+        $denominator = [Math]::Max(1, $maximumBoundary - $mediumBoundary)
+        $coloredWidth = 33 + [Math]::Floor(15 * (($scaleScore - $mediumBoundary) / $denominator))
     }
-    Write-Host -NoNewline (' {0,7}  ' -f "$($Source.Score)%") -ForegroundColor White
-    Write-IPQBadge -Value $riskLevel -Width 10
-    Write-Host ''
+    elseif ($scaleScore -ge $lowBoundary) {
+        $denominator = [Math]::Max(1, $mediumBoundary - $lowBoundary)
+        $coloredWidth = 17 + [Math]::Floor(16 * (($scaleScore - $lowBoundary) / $denominator))
+    }
+    else {
+        $denominator = [Math]::Max(1, $lowBoundary)
+        $coloredWidth = 1 + [Math]::Floor(16 * ($scaleScore / $denominator))
+    }
+    $coloredWidth = [Math]::Max(1, [Math]::Min(48, $coloredWidth))
+
+    $displayScore = if ($sourceName -eq 'DB-IP') {
+        ''
+    }
+    elseif ($sourceName -eq 'ipapi') {
+        "$($Source.Score)%"
+    }
+    else {
+        "$($Source.Score)"
+    }
+    $marker = "$displayScore|"
+    $coloredWidth = [Math]::Max($coloredWidth, $marker.Length)
+    $characters = [char[]](' ' * $coloredWidth)
+    $markerStart = $coloredWidth - $marker.Length
+    for ($index = 0; $index -lt $marker.Length; $index++) {
+        $characters[$markerStart + $index] = $marker[$index]
+    }
+    $track = -join $characters
+
+    Write-Host -NoNewline (Format-IPQFixedWidth -Text "$displayName：" -Width 17) -ForegroundColor Cyan
+    $greenLength = [Math]::Min(16, $coloredWidth)
+    $yellowLength = [Math]::Min(16, [Math]::Max(0, $coloredWidth - 16))
+    $redLength = [Math]::Max(0, $coloredWidth - 32)
+    if ($greenLength -gt 0) {
+        Write-Host -NoNewline $track.Substring(0, $greenLength) -ForegroundColor White -BackgroundColor DarkGreen
+    }
+    if ($yellowLength -gt 0) {
+        Write-Host -NoNewline $track.Substring(16, $yellowLength) -ForegroundColor White -BackgroundColor DarkYellow
+    }
+    if ($redLength -gt 0) {
+        Write-Host -NoNewline $track.Substring(32, $redLength) -ForegroundColor White -BackgroundColor DarkRed
+    }
+    Write-Host $riskLevel -ForegroundColor (Get-IPQBadgeColor $riskLevel)
 }
 
 function Write-IPQPrettyReport {
@@ -2086,14 +2194,14 @@ function Write-IPQPrettyReport {
 
     $lineWidth = 72
     $separator = '#' * $lineWidth
-    Write-Host ''
     Write-Host $separator -ForegroundColor DarkGray
     Write-Host (Format-IPQFixedWidth -Text "IP质量体检报告：$($Result.Head.Address)" -Width $lineWidth -Align Center) -ForegroundColor Green
     Write-Host (Format-IPQFixedWidth -Text 'https://github.com/FinalVar/IPQuality' -Width $lineWidth -Align Center) -ForegroundColor DarkCyan
+    Write-Host (Format-IPQFixedWidth -Text 'pwsh .\windows\IPQuality.ps1 -IPv4' -Width $lineWidth -Align Center) -ForegroundColor Gray
     Write-Host (Format-IPQFixedWidth -Text "报告时间：$($Result.Head.TimeUtc)  版本：$($Result.Head.Version)" -Width $lineWidth -Align Center) -ForegroundColor Gray
     Write-Host $separator -ForegroundColor DarkGray
 
-    Write-IPQSectionTitle '一、基础信息（MaxMind 数据库）'
+    Write-IPQSectionTitle '一、基础信息（Maxmind 数据库）'
     Write-IPQKeyValue '自治系统号：' "AS$(Format-IPQCell (Get-IPQValue $Result.Info 'ASN'))"
     Write-IPQKeyValue '组织：' (Get-IPQValue $Result.Info 'Organization')
     $cityParts = @(
@@ -2101,13 +2209,23 @@ function Write-IPQPrettyReport {
         (Get-IPQValue $Result.Info 'City'),
         (Get-IPQValue $Result.Info 'PostalCode')
     ) | Where-Object { $_ }
+    $latitude = Get-IPQValue $Result.Info 'Latitude'
+    $longitude = Get-IPQValue $Result.Info 'Longitude'
+    if ($latitude -and $longitude) {
+        Write-IPQKeyValue '坐标：' "$latitude, $longitude"
+    }
+    $map = Get-IPQValue $Result.Info 'Map' ''
+    if ($map) {
+        Write-IPQKeyValue '地图：' $map
+    }
     Write-IPQKeyValue '城市：' ($cityParts -join ', ')
     Write-IPQKeyValue '使用地：' "[$(Format-IPQCell (Get-IPQValue $Result.Info 'CountryCode'))] $(Format-IPQCell (Get-IPQValue $Result.Info 'Country')), [$(Format-IPQCell (Get-IPQValue $Result.Info 'ContinentCode'))] $(Format-IPQCell (Get-IPQValue $Result.Info 'Continent'))"
     Write-IPQKeyValue '注册地：' "[$(Format-IPQCell (Get-IPQValue $Result.Info 'RegisteredCountryCode'))] $(Format-IPQCell (Get-IPQValue $Result.Info 'RegisteredCountry'))"
     Write-IPQKeyValue '时区：' (Get-IPQValue $Result.Info 'TimeZone')
     $geoType = Get-IPQValue $Result.Info 'GeoType' '未知'
     Write-Host -NoNewline (Format-IPQFixedWidth -Text 'IP类型：' -Width 22) -ForegroundColor Cyan
-    Write-IPQBadge -Value $geoType -Width 10
+    Write-Host -NoNewline '   '
+    Write-IPQBadge -Value $geoType -Width 8
     Write-Host ''
 
     Write-IPQSectionTitle '二、IP类型属性'
@@ -2119,18 +2237,24 @@ function Write-IPQPrettyReport {
         if ($null -eq $assessment) {
             $assessment = Get-IPQTypeAssessment -Sources $Result.DataSources
         }
-        $typeNames = @('IPinfo', 'ipregistry', 'ipapi', 'IP2Loc', 'AbuseIPDB')
-        Write-IPQMatrixHeader -Label '数据库：' -Values $typeNames -CellWidth 12
-        Write-IPQMatrixBadges -Label '使用类型：' -Values @($assessment.Sources | ForEach-Object { if ($_.Available) { $_.UsageLabel } else { '不可用' } }) -CellWidth 12
-        Write-IPQMatrixBadges -Label '公司类型：' -Values @($assessment.Sources | ForEach-Object { if ($_.Available) { $_.CompanyLabel } else { '不可用' } }) -CellWidth 12
-        Write-Host -NoNewline '综合判断：' -ForegroundColor Cyan
-        Write-IPQBadge -Value $assessment.Verdict -Width 20
-        Write-Host "  家宽信号 $($assessment.HomeSignals) / 机房信号 $($assessment.DatacenterSignals)" -ForegroundColor Gray
+        $typeNames = @('IPinfo', 'ipregistry', 'ipapi', 'IP2Location', 'AbuseIPDB')
+        Write-IPQMatrixHeader -Label '数据库：' -Values $typeNames -CellWidth 12 -LabelWidth 11
+        Write-IPQMatrixBadges -Label '使用类型：' -Values @($assessment.Sources | ForEach-Object { if ($_.Available) { $_.UsageLabel } else { '不可用' } }) -CellWidth 12 -LabelWidth 11
+        Write-IPQMatrixBadges -Label '公司类型：' -Values @($assessment.Sources | ForEach-Object { if ($_.Available) { $_.CompanyLabel } else { '不可用' } }) -CellWidth 12 -LabelWidth 11
     }
 
     Write-IPQSectionTitle '三、风险评分'
-    Write-Host '风险等级：  极低/低风险                 中等                 高/极高' -ForegroundColor DarkCyan
-    $scoreSources = @($Result.DataSources | Where-Object { $_.Available -and $null -ne $_.Score })
+    Write-Host -NoNewline (Format-IPQFixedWidth -Text '风险等级：' -Width 17) -ForegroundColor Cyan
+    Write-Host -NoNewline (Format-IPQFixedWidth -Text '极低       低' -Width 16 -Align Center) -ForegroundColor White -BackgroundColor DarkGreen
+    Write-Host -NoNewline (Format-IPQFixedWidth -Text '中等' -Width 16 -Align Center) -ForegroundColor White -BackgroundColor DarkYellow
+    Write-Host (Format-IPQFixedWidth -Text '高       极高' -Width 16 -Align Center) -ForegroundColor White -BackgroundColor DarkRed
+        $scoreSources = @(
+            foreach ($name in @('IP2Location', 'Scamalytics', 'ipapi', 'AbuseIPDB', 'IPQS', 'DB-IP')) {
+                $Result.DataSources |
+                    Where-Object { $_.Name -eq $name -and $_.Available -and $null -ne $_.Score } |
+                    Select-Object -First 1
+            }
+        )
     if ($scoreSources.Count -eq 0) {
         Write-Host '没有可用评分' -ForegroundColor DarkGray
     }
@@ -2146,15 +2270,15 @@ function Write-IPQPrettyReport {
     }
     else {
         $factorOrder = @('IP2Location', 'ipapi', 'ipregistry', 'IPQS', 'Scamalytics', 'ipdata', 'IPinfo', 'DB-IP')
-        $factorLabels = @('IP2Loc', 'ipapi', 'ipreg', 'IPQS', 'Scam', 'ipdata', 'IPinfo', 'DB-IP')
         $factorSourceList = [Collections.Generic.List[object]]::new()
         foreach ($name in $factorOrder) {
             $match = @($Result.DataSources | Where-Object Name -eq $name)
             $factorSourceList.Add($(if ($match.Count) { $match[0] } else { $null }))
         }
         $factorSources = $factorSourceList.ToArray()
-        Write-IPQMatrixHeader -Label '数据库：' -Values $factorLabels -CellWidth 7
-        Write-IPQMatrixBadges -Label '地区：' -Values @($factorSources | ForEach-Object { if ($null -ne $_ -and $_.Available) { Format-IPQCell $_.CountryCode } else { '-' } }) -CellWidth 7
+        Write-Host -NoNewline '库： ' -ForegroundColor Cyan
+        Write-Host 'IP2Location ipapi ipregistry IPQS SCAMALYTICS ipdata IPinfo DB-IP' -ForegroundColor DarkCyan
+        Write-IPQMatrixTexts -Label '地区：' -Values @($factorSources | ForEach-Object { if ($null -ne $_ -and $_.Available -and $_.CountryCode) { "[$($_.CountryCode)]" } else { '-' } }) -CellWidth 8 -LabelWidth 8
         foreach ($definition in @(
             @('代理：', 'Proxy'),
             @('Tor：', 'Tor'),
@@ -2164,34 +2288,15 @@ function Write-IPQPrettyReport {
             @('机器人：', 'Robot')
         )) {
             $propertyName = $definition[1]
-            Write-IPQMatrixBadges -Label $definition[0] -Values @(
+            Write-IPQMatrixTexts -Label $definition[0] -Values @(
                 $factorSources | ForEach-Object {
                     if ($null -ne $_ -and $_.Available) { Format-IPQFactor $_.Flags.$propertyName } else { '无' }
                 }
-            ) -CellWidth 7
-        }
-        foreach ($group in @(
-            @('Proxy', 'Tor', 'VPN'),
-            @('Server', 'Abuser', 'Robot')
-        )) {
-            Write-Host -NoNewline '判定：   ' -ForegroundColor Cyan
-            foreach ($factor in $group) {
-                $item = $Result.Consensus.$factor
-                $verdict = switch ($item.Verdict) {
-                    'Detected' { '检出' }
-                    'NotDetected' { '未检出' }
-                    'Mixed' { '冲突' }
-                    default { '未知' }
-                }
-                Write-Host -NoNewline "$factor " -ForegroundColor Gray
-                Write-IPQBadge -Value $verdict -Width 8
-                Write-Host -NoNewline " $($item.Positive)/$($item.Available)  " -ForegroundColor DarkGray
-            }
-            Write-Host ''
+            ) -CellWidth 8 -LabelWidth 8
         }
     }
 
-    Write-IPQSectionTitle '五、流媒体及 AI 服务解锁检测'
+    Write-IPQSectionTitle '五、流媒体及AI服务解锁检测'
     if (@($Result.Media.PSObject.Properties).Count -eq 0) {
         Write-Host '已跳过' -ForegroundColor DarkGray
     }
@@ -2205,58 +2310,48 @@ function Write-IPQPrettyReport {
         $mediaItems = $mediaItemList.ToArray()
         Write-IPQMatrixHeader -Label '服务商：' -Values $mediaLabels -CellWidth 9
         Write-IPQMatrixBadges -Label '状态：' -Values @($mediaItems | ForEach-Object { if ($null -ne $_) { ConvertTo-IPQMediaStatusLabel $_.Status } else { '失败' } }) -CellWidth 9
-        Write-IPQMatrixBadges -Label '地区：' -Values @($mediaItems | ForEach-Object { if ($null -ne $_) { Format-IPQCell $_.Region } else { '-' } }) -CellWidth 9
+        Write-IPQMatrixTexts -Label '地区：' -Values @($mediaItems | ForEach-Object { if ($null -ne $_ -and $_.Region) { "[$($_.Region)]" } else { '-' } }) -CellWidth 9
         Write-IPQMatrixBadges -Label '方式：' -Values @($mediaItems | ForEach-Object { if ($null -ne $_) { Format-IPQCell $_.Type } else { '-' } }) -CellWidth 9
     }
 
     Write-IPQSectionTitle '六、邮局连通性及黑名单检测'
-    Write-Host -NoNewline '本地 25 端口出站：' -ForegroundColor Cyan
+    Write-Host -NoNewline '本地25端口出站：' -ForegroundColor Cyan
     if ($null -eq $Result.Mail) {
-        Write-IPQBadge -Value '已跳过' -Width 10
+        Write-Host '已跳过' -ForegroundColor DarkGray
     }
     else {
-        Write-IPQBadge -Value $(if ($Result.Mail.Port25) { '可用' } else { '阻断' }) -Width 10
+        Write-Host $(if ($Result.Mail.Port25) { '可用' } else { '阻断' }) -ForegroundColor $(if ($Result.Mail.Port25) { 'Green' } else { 'Red' })
     }
-    Write-Host ''
     if ($null -ne $Result.Mail) {
         $serviceProperties = @($Result.Mail.Services.PSObject.Properties)
-        for ($offset = 0; $offset -lt $serviceProperties.Count; $offset += 6) {
-            Write-Host -NoNewline $(if ($offset -eq 0) { '通信：   ' } else { '         ' }) -ForegroundColor Cyan
-            foreach ($property in ($serviceProperties | Select-Object -Skip $offset -First 6)) {
-                Write-Host -NoNewline (Format-IPQFixedWidth -Text $property.Name -Width 7 -Align Center) -ForegroundColor Gray
-                Write-IPQBadge -Value $(if ($property.Value) { '可用' } else { '阻断' }) -Width 4
-                Write-Host -NoNewline ' '
-            }
-            Write-Host ''
+        Write-Host -NoNewline '通信：  ' -ForegroundColor Cyan
+        foreach ($property in $serviceProperties) {
+            Write-Host -NoNewline $property.Name -ForegroundColor White -BackgroundColor $(if ($property.Value) { 'DarkGreen' } else { 'DarkRed' })
+            Write-Host -NoNewline ' '
         }
+        Write-Host ''
     }
-    Write-Host -NoNewline 'DNSBL：  ' -ForegroundColor Cyan
+    Write-Host -NoNewline 'IP地址黑名单数据库：  ' -ForegroundColor Cyan
     if ($null -eq $Result.DNSBlacklist) {
-        Write-IPQBadge -Value '已跳过' -Width 10
+        Write-Host -NoNewline '已跳过' -ForegroundColor DarkGray
     }
     elseif (-not $Result.DNSBlacklist.Supported) {
-        Write-IPQBadge -Value '不支持' -Width 10
+        Write-Host -NoNewline '不支持' -ForegroundColor DarkGray
     }
     else {
         foreach ($summary in @(
-            @("总数 $($Result.DNSBlacklist.Total)", 'Cyan'),
-            @("干净 $($Result.DNSBlacklist.Clean)", 'DarkGreen'),
-            @("标记 $($Result.DNSBlacklist.Marked)", 'DarkYellow'),
-            @("黑名单 $($Result.DNSBlacklist.Blacklisted)", 'DarkRed'),
-            @("错误 $($Result.DNSBlacklist.Errors)", 'DarkGray')
+            @("有效 $($Result.DNSBlacklist.Total)", 'Cyan'),
+            @("正常 $($Result.DNSBlacklist.Clean)", 'Green'),
+            @("已标记 $($Result.DNSBlacklist.Marked)", 'Yellow'),
+            @("黑名单 $($Result.DNSBlacklist.Blacklisted)", 'Red')
         )) {
-            Write-Host -NoNewline (Format-IPQFixedWidth -Text $summary[0] -Width 12 -Align Center) -ForegroundColor White -BackgroundColor $summary[1]
-            Write-Host -NoNewline ' '
+            Write-Host -NoNewline "$($summary[0])   " -ForegroundColor $summary[1]
         }
     }
     Write-Host ''
 
     if (@($Result.Warnings).Count -gt 0) {
-        Write-Host ''
-        Write-Host "数据源警告（$(@($Result.Warnings).Count)）：" -ForegroundColor DarkYellow
-        foreach ($warning in ($Result.Warnings | Select-Object -First 5)) {
-            Write-Host "  • $warning" -ForegroundColor Yellow
-        }
+        Write-Host "数据源警告：$(@($Result.Warnings).Count) 项（详见 JSON 报告）" -ForegroundColor DarkYellow
     }
     Write-Host ('=' * $lineWidth) -ForegroundColor DarkGray
 }

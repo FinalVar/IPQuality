@@ -168,7 +168,8 @@ Assert-True ($reportText -match '五、流媒体及 AI 服务解锁检测') '报
 Assert-True ($reportText -match 'ChatGPT.+解锁.+US.+原生') 'ChatGPT 应显示状态、地区和解锁方式'
 $prettyOutput = (& { Format-IPQualityReport -Result $syntheticResult } 6>&1 | Out-String)
 Assert-True ($prettyOutput -match '二、IP类型属性') '彩色控制台报告应包含 IP 类型矩阵'
-Assert-True ($prettyOutput -match '五、流媒体及 AI 服务解锁检测') '彩色控制台报告应包含流媒体矩阵'
+Assert-True ($prettyOutput -match '五、流媒体及\s*AI服务解锁检测') '彩色控制台报告应包含流媒体矩阵'
+Assert-True ($prettyOutput -match 'IP2Location ipapi ipregistry IPQS SCAMALYTICS ipdata IPinfo DB-IP') '风险因子矩阵应保留完整数据库名称'
 
 $offlineTemporaryRoot = Join-Path ([IO.Path]::GetTempPath()) "ipquality-test-$([Guid]::NewGuid().ToString('N'))"
 [void](New-Item -ItemType Directory -Path $offlineTemporaryRoot)
