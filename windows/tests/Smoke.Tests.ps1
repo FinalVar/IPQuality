@@ -64,6 +64,18 @@ Assert-Equal $parserErrors 0 '所有 PowerShell 文件应通过语法解析'
     if ($consensus.Proxy.Verdict -ne 'Mixed') {
         throw '冲突风险源必须标为 Mixed'
     }
+    if ((ConvertTo-IPQTypeLabel -SourceName IPinfo -Value isp) -ne '家宽') {
+        throw 'IPinfo ISP 应映射为家宽'
+    }
+    if ((ConvertTo-IPQTypeLabel -SourceName IP2Location -Value 'DCH/Hosting') -ne '机房') {
+        throw 'IP2Location DCH 应映射为机房'
+    }
+    if ((ConvertTo-IPQTypeLabel -SourceName AbuseIPDB -Value 'Fixed Line ISP') -ne '家宽') {
+        throw 'AbuseIPDB 固网应映射为家宽'
+    }
+    if ((Get-IPQRiskLevel -SourceName IPQS -Score 92) -ne '高风险') {
+        throw 'IPQS 高分风险等级映射失败'
+    }
 }
 
 function ConvertTo-TestBase64Url {
@@ -103,15 +115,51 @@ $syntheticResult = [pscustomobject][ordered]@{
         TimeZone = 'Etc/UTC'
         Map = ''
     }
-    DataSources = @()
-    Consensus = $emptyConsensus
-    Media = [pscustomobject]@{}
+    DataSources = @(
+        [pscustomobject]@{
+            Name = 'IPinfo'
+            Available = $true
+            CountryCode = 'US'
+            UsageType = 'isp'
+            CompanyType = 'isp'
+            Score = $null
+            RiskLevel = ''
+            Flags = [pscustomobject]@{
+                Proxy = $false
+                Tor = $false
+                VPN = $false
+                Server = $false
+                Abuser = $null
+                Robot = $null
+            }
+            Error = ''
+        }
+    )
+    Consensus = & $module {
+        $source = New-IPQSourceResult -Name IPinfo -Available $true -Flags (New-IPQFlags -Proxy $false -Tor $false -Vpn $false -Server $false)
+        Get-IPQConsensus -Sources @($source)
+    }
+    Media = [pscustomobject]@{
+        ChatGPT = [pscustomobject]@{
+            Name = 'ChatGPT'
+            Status = 'Available'
+            Region = 'US'
+            Type = '原生'
+            TypeEvidence = 'synthetic'
+            Evidence = 'synthetic'
+            Error = ''
+        }
+    }
     Mail = $null
     DNSBlacklist = $null
     Warnings = @()
 }
 $reportText = Get-IPQualityReportText -Result $syntheticResult
 Assert-True ($reportText -match '203\.0\.\*\.\*') '文本报告应包含掩码地址'
+Assert-True ($reportText -match '二、IP类型属性') '报告应包含原版 IP 类型模块'
+Assert-True ($reportText -match '结论：家宽') '报告应显示家宽综合判断'
+Assert-True ($reportText -match '五、流媒体及 AI 服务解锁检测') '报告应包含流媒体与 AI 模块'
+Assert-True ($reportText -match 'ChatGPT.+解锁.+US.+原生') 'ChatGPT 应显示状态、地区和解锁方式'
 
 $offlineTemporaryRoot = Join-Path ([IO.Path]::GetTempPath()) "ipquality-test-$([Guid]::NewGuid().ToString('N'))"
 [void](New-Item -ItemType Directory -Path $offlineTemporaryRoot)

@@ -1,7 +1,7 @@
 #Requires -Version 7.2
 Set-StrictMode -Version Latest
 
-$script:IPQualityVersion = '0.1.0'
+$script:IPQualityVersion = '0.2.0'
 $script:UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
 $script:SourceOrder = @(
     'IPinfo',
@@ -11,7 +11,8 @@ $script:SourceOrder = @(
     'AbuseIPDB',
     'IP2Location',
     'ipdata',
-    'IPQS'
+    'IPQS',
+    'DB-IP'
 )
 
 function Get-IPQValue {
@@ -372,6 +373,7 @@ function New-IPQSourceResult {
         [AllowEmptyString()][string]$UsageType,
         [AllowEmptyString()][string]$CompanyType,
         [AllowNull()][object]$Score,
+        [AllowEmptyString()][string]$RiskLevel = '',
         [AllowNull()][object]$Flags,
         [AllowEmptyString()][string]$Error
     )
@@ -382,8 +384,100 @@ function New-IPQSourceResult {
         UsageType = $UsageType
         CompanyType = $CompanyType
         Score = $Score
+        RiskLevel = $RiskLevel
         Flags = if ($null -ne $Flags) { $Flags } else { New-IPQFlags }
         Error = $Error
+    }
+}
+
+function ConvertTo-IPQTypeLabel {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()][string]$SourceName,
+        [AllowNull()][object]$Value
+    )
+
+    $text = "$Value".Trim()
+    if ([string]::IsNullOrWhiteSpace($text) -or $text -eq 'null') {
+        return '-'
+    }
+
+    $first = ($text -split '/')[0].Trim()
+    switch -Regex ($first) {
+        '^(?i:isp|fixed line isp)$' { return '家宽' }
+        '^(?i:mobile isp|mob)$' { return '手机' }
+        '^(?i:hosting|data center.*|dch)$' { return '机房' }
+        '^(?i:content delivery network|cdn)$' { return 'CDN' }
+        '^(?i:business|commercial|com)$' { return '商业' }
+        '^(?i:education|university.*|edu)$' { return '教育' }
+        '^(?i:government|gov)$' { return '政府' }
+        '^(?i:banking)$' { return '银行' }
+        '^(?i:organization|org)$' { return '组织' }
+        '^(?i:military|mil)$' { return '军队' }
+        '^(?i:library|lib)$' { return '图书馆' }
+        '^(?i:search engine spider|ses)$' { return '蜘蛛' }
+        '^(?i:reserved|rsv)$' { return '保留' }
+        default { return '其他' }
+    }
+}
+
+function Get-IPQRiskLevel {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SourceName,
+        [AllowNull()][object]$Score,
+        [AllowEmptyString()][string]$Hint = ''
+    )
+
+    switch -Regex ($Hint.Trim()) {
+        '^(?i:very low)$' { return '极低风险' }
+        '^(?i:low)$' { return '低风险' }
+        '^(?i:elevated)$' { return '较高风险' }
+        '^(?i:medium)$' { return '中风险' }
+        '^(?i:high)$' { return '高风险' }
+        '^(?i:very high)$' { return '极高风险' }
+    }
+    if ($null -eq $Score) {
+        return ''
+    }
+
+    $number = [double]$Score
+    switch ($SourceName) {
+        'Scamalytics' {
+            if ($number -lt 20) { return '低风险' }
+            if ($number -lt 60) { return '中风险' }
+            if ($number -lt 90) { return '高风险' }
+            return '极高风险'
+        }
+        'IP2Location' {
+            if ($number -lt 33) { return '低风险' }
+            if ($number -lt 66) { return '中风险' }
+            return '高风险'
+        }
+        'AbuseIPDB' {
+            if ($number -lt 25) { return '低风险' }
+            if ($number -lt 75) { return '高风险' }
+            return '建议封禁'
+        }
+        'IPQS' {
+            if ($number -lt 75) { return '低风险' }
+            if ($number -lt 85) { return '可疑IP' }
+            if ($number -lt 90) { return '存在风险' }
+            return '高风险'
+        }
+        'DB-IP' {
+            if ($number -lt 33) { return '低风险' }
+            if ($number -lt 66) { return '中风险' }
+            return '高风险'
+        }
+        'ipapi' {
+            if ($number -lt 0.85) { return '极低风险' }
+            if ($number -lt 3) { return '低风险' }
+            if ($number -lt 30) { return '较高风险' }
+            if ($number -lt 70) { return '高风险' }
+            return '极高风险'
+        }
+        default { return '' }
     }
 }
 
@@ -483,6 +577,7 @@ function Get-IPQSourceScamalytics {
         -Available $true `
         -CountryCode "$(Get-IPQValue $data 'external_datasources.maxmind_geolite2.ip_country_code' '')" `
         -Score (ConvertTo-IPQScore (Get-IPQValue $data 'scamalytics.scamalytics_score')) `
+        -RiskLevel (Get-IPQRiskLevel -SourceName 'Scamalytics' -Score (ConvertTo-IPQScore (Get-IPQValue $data 'scamalytics.scamalytics_score'))) `
         -Flags (New-IPQFlags `
             -Proxy (Get-IPQValue $data 'external_datasources.firehol.is_proxy') `
             -Tor (Get-IPQValue $data 'external_datasources.x4bnet.is_tor') `
@@ -541,13 +636,17 @@ function Get-IPQSourceIPApi {
         return New-IPQSourceResult -Name 'ipapi' -Available $false -Error $(if ($response.Error) { $response.Error } else { "$(Get-IPQValue $data 'message' '无有效 JSON')" })
     }
 
+    $rawScore = "$(Get-IPQValue $data 'company.abuser_score' '')"
+    $riskHint = if ($rawScore -match '\((?<level>[^)]+)\)') { $Matches.level } else { '' }
+    $score = ConvertTo-IPQScore $rawScore -Fraction
     New-IPQSourceResult `
         -Name 'ipapi' `
         -Available $true `
         -CountryCode "$(Get-IPQValue $data 'location.country_code' '')" `
         -UsageType "$(Get-IPQValue $data 'asn.type' '')" `
         -CompanyType "$(Get-IPQValue $data 'company.type' '')" `
-        -Score (ConvertTo-IPQScore (Get-IPQValue $data 'company.abuser_score') -Fraction) `
+        -Score $score `
+        -RiskLevel (Get-IPQRiskLevel -SourceName 'ipapi' -Score $score -Hint $riskHint) `
         -Flags (New-IPQFlags `
             -Proxy (Get-IPQValue $data 'is_proxy') `
             -Tor (Get-IPQValue $data 'is_tor') `
@@ -574,6 +673,7 @@ function Get-IPQSourceAbuseIPDB {
         -CountryCode "$(Get-IPQValue $data 'data.countryCode' '')" `
         -UsageType "$(Get-IPQValue $data 'data.usageType' '')" `
         -Score $score `
+        -RiskLevel (Get-IPQRiskLevel -SourceName 'AbuseIPDB' -Score $score) `
         -Flags (New-IPQFlags -Abuser $(if ($null -eq $score) { $null } elseif ($score -gt 0) { $true } else { $false })) `
         -Error ''
 }
@@ -604,6 +704,7 @@ function Get-IPQSourceIP2Location {
         -UsageType "$(Get-IPQValue $data 'usage_type' '')" `
         -CompanyType "$(Get-IPQValue $data 'as_info.as_usage_type' '')" `
         -Score (ConvertTo-IPQScore (Get-IPQValue $data 'fraud_score')) `
+        -RiskLevel (Get-IPQRiskLevel -SourceName 'IP2Location' -Score (ConvertTo-IPQScore (Get-IPQValue $data 'fraud_score'))) `
         -Flags (New-IPQFlags `
             -Proxy $proxy `
             -Tor (Get-IPQValue $data 'proxy.is_tor') `
@@ -655,12 +756,60 @@ function Get-IPQSourceIPQS {
         -Available $true `
         -CountryCode "$(Get-IPQValue $data 'country_code' '')" `
         -Score (ConvertTo-IPQScore (Get-IPQValue $data 'fraud_score')) `
+        -RiskLevel (Get-IPQRiskLevel -SourceName 'IPQS' -Score (ConvertTo-IPQScore (Get-IPQValue $data 'fraud_score'))) `
         -Flags (New-IPQFlags `
             -Proxy (Get-IPQValue $data 'proxy') `
             -Tor (Get-IPQValue $data 'tor') `
             -Vpn (Get-IPQValue $data 'vpn') `
             -Abuser (Get-IPQValue $data 'recent_abuse') `
             -Robot (Get-IPQValue $data 'bot_status')) `
+        -Error ''
+}
+
+function Get-IPQSourceDBIP {
+    param([object]$Context, [string]$Address)
+
+    $response = Invoke-IPQRequest -Context $Context -Uri "https://db-ip.com/$Address"
+    if (-not $response.Success -or [string]::IsNullOrWhiteSpace($response.Body)) {
+        return New-IPQSourceResult -Name 'DB-IP' -Available $false -Error $(if ($response.Error) { $response.Error } else { '页面内容为空' })
+    }
+
+    $body = $response.Body
+    $countryCode = ''
+    if ($body -match '"countryCode"\s*:\s*"(?<country>[A-Z]{2})"') {
+        $countryCode = $Matches.country
+    }
+
+    $riskText = ''
+    if ($body -match '(?is)Estimated threat level for this IP address is\s*<span[^>]*>(?<risk>[^<]+)<') {
+        $riskText = $Matches.risk.Trim()
+    }
+    $score = switch -Regex ($riskText) {
+        '^(?i:low)$' { 0; break }
+        '^(?i:medium)$' { 50; break }
+        '^(?i:high)$' { 100; break }
+        default { $null }
+    }
+
+    $flags = New-IPQFlags
+    $crawlerIndex = $body.IndexOf('>Crawler<', [StringComparison]::OrdinalIgnoreCase)
+    if ($crawlerIndex -ge 0) {
+        $tail = $body.Substring($crawlerIndex)
+        $matches = [regex]::Matches($tail, '(?is)<span[^>]*class=["'']sr-only["''][^>]*>\s*(?<value>Yes|No)\s*</span>')
+        if ($matches.Count -ge 3) {
+            $flags.Robot = $matches[0].Groups['value'].Value -eq 'Yes'
+            $flags.Proxy = $matches[1].Groups['value'].Value -eq 'Yes'
+            $flags.Abuser = $matches[2].Groups['value'].Value -eq 'Yes'
+        }
+    }
+
+    New-IPQSourceResult `
+        -Name 'DB-IP' `
+        -Available $true `
+        -CountryCode $countryCode `
+        -Score $score `
+        -RiskLevel (Get-IPQRiskLevel -SourceName 'DB-IP' -Score $score -Hint $riskText) `
+        -Flags $flags `
         -Error ''
 }
 
@@ -680,6 +829,7 @@ function Get-IPQRiskSources {
         IP2Location = { Get-IPQSourceIP2Location -Context $Context -Address $Address }
         ipdata = { Get-IPQSourceIPData -Context $Context -Address $Address }
         IPQS = { Get-IPQSourceIPQS -Context $Context -Address $Address }
+        'DB-IP' = { Get-IPQSourceDBIP -Context $Context -Address $Address }
     }
 
     $results = [Collections.Generic.List[object]]::new()
@@ -733,6 +883,62 @@ function Get-IPQConsensus {
     return [pscustomobject]$result
 }
 
+function Get-IPQTypeAssessment {
+    [CmdletBinding()]
+    param([AllowNull()][object[]]$Sources)
+
+    $rows = [Collections.Generic.List[object]]::new()
+    $homeSignals = 0
+    $idcSignals = 0
+    foreach ($name in @('IPinfo', 'ipregistry', 'ipapi', 'IP2Location', 'AbuseIPDB')) {
+        $matches = @($Sources | Where-Object Name -eq $name)
+        if ($matches.Count -eq 0 -or -not $matches[0].Available) {
+            $rows.Add([pscustomobject][ordered]@{
+                Name = $name
+                Available = $false
+                UsageType = ''
+                UsageLabel = '-'
+                CompanyType = ''
+                CompanyLabel = '-'
+            })
+            continue
+        }
+
+        $source = $matches[0]
+        $usageLabel = ConvertTo-IPQTypeLabel -SourceName $name -Value $source.UsageType
+        $companyLabel = ConvertTo-IPQTypeLabel -SourceName $name -Value $source.CompanyType
+        if ($usageLabel -eq '家宽' -or $companyLabel -eq '家宽') { $homeSignals++ }
+        if ($usageLabel -in @('机房', 'CDN') -or $companyLabel -in @('机房', 'CDN')) { $idcSignals++ }
+        $rows.Add([pscustomobject][ordered]@{
+            Name = $name
+            Available = $true
+            UsageType = $source.UsageType
+            UsageLabel = $usageLabel
+            CompanyType = $source.CompanyType
+            CompanyLabel = $companyLabel
+        })
+    }
+
+    $verdict = if ($homeSignals -gt 0 -and $idcSignals -eq 0) {
+        '家宽'
+    }
+    elseif ($idcSignals -gt 0 -and $homeSignals -eq 0) {
+        '机房'
+    }
+    elseif ($homeSignals -gt 0 -and $idcSignals -gt 0) {
+        '混合（数据库结论冲突）'
+    }
+    else {
+        '未知'
+    }
+    return [pscustomobject][ordered]@{
+        Verdict = $verdict
+        HomeSignals = $homeSignals
+        DatacenterSignals = $idcSignals
+        Sources = $rows.ToArray()
+    }
+}
+
 function New-IPQMediaResult {
     param(
         [Parameter(Mandatory)][string]$Name,
@@ -747,7 +953,8 @@ function New-IPQMediaResult {
         Name = $Name
         Status = $Status
         Region = $Region
-        Type = $Context.RouteType
+        Type = '未知'
+        TypeEvidence = ''
         Evidence = $Evidence
         Error = $Error
     }
@@ -772,6 +979,76 @@ function Get-IPQRegionFromText {
         }
     }
     return ''
+}
+
+function Test-IPQGlobalAddress {
+    param([Parameter(Mandatory)][string]$Address)
+
+    $parsed = $null
+    if (-not [Net.IPAddress]::TryParse($Address, [ref]$parsed)) {
+        return $false
+    }
+    if ([Net.IPAddress]::IsLoopback($parsed)) {
+        return $false
+    }
+    if ($parsed.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork) {
+        $bytes = $parsed.GetAddressBytes()
+        if ($bytes[0] -in @(0, 10, 127) -or $bytes[0] -ge 224) { return $false }
+        if ($bytes[0] -eq 169 -and $bytes[1] -eq 254) { return $false }
+        if ($bytes[0] -eq 172 -and $bytes[1] -ge 16 -and $bytes[1] -le 31) { return $false }
+        if ($bytes[0] -eq 192 -and $bytes[1] -eq 168) { return $false }
+        return $true
+    }
+
+    if ($parsed.IsIPv6LinkLocal -or $parsed.IsIPv6Multicast -or $parsed.IsIPv6SiteLocal) {
+        return $false
+    }
+    $bytes = $parsed.GetAddressBytes()
+    return (($bytes[0] -band 0xFE) -ne 0xFC)
+}
+
+function Get-IPQMediaUnlockType {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string[]]$Domain,
+        [ValidateSet(4, 6)][int]$AddressFamily
+    )
+
+    $recordType = if ($AddressFamily -eq 4) { 'A' } else { 'AAAA' }
+    foreach ($name in $Domain) {
+        try {
+            $addresses = @(
+                Resolve-DnsName -Name $name -Type $recordType -DnsOnly -ErrorAction Stop |
+                    Where-Object { $null -ne $_.PSObject.Properties['IPAddress'] } |
+                    ForEach-Object { $_.IPAddress } |
+                    Where-Object { $_ }
+            )
+        }
+        catch {
+            return [pscustomobject]@{ Type = 'DNS'; Evidence = "$name 正常域名未获得 $recordType 记录" }
+        }
+        if ($addresses.Count -eq 0 -or @($addresses | Where-Object { -not (Test-IPQGlobalAddress $_) }).Count -gt 0) {
+            return [pscustomobject]@{ Type = 'DNS'; Evidence = "$name 返回空地址、私网地址或保留地址" }
+        }
+
+        $randomName = "ipq-$([Guid]::NewGuid().ToString('N')).$name"
+        $wildcard = @()
+        try {
+            $wildcard = @(
+                Resolve-DnsName -Name $randomName -Type $recordType -DnsOnly -ErrorAction Stop |
+                    Where-Object { $null -ne $_.PSObject.Properties['IPAddress'] } |
+                    ForEach-Object { $_.IPAddress } |
+                    Where-Object { $_ }
+            )
+        }
+        catch {
+            $wildcard = @()
+        }
+        if ($wildcard.Count -gt 0) {
+            return [pscustomobject]@{ Type = 'DNS'; Evidence = "$name 的随机子域名被 DNS 合成" }
+        }
+    }
+    return [pscustomobject]@{ Type = '原生'; Evidence = '正常域名解析为公网地址，随机子域名未被合成' }
 }
 
 function Test-IPQTikTok {
@@ -1005,6 +1282,15 @@ function Get-IPQMediaChecks {
         Reddit = { Test-IPQReddit -Context $Context }
         ChatGPT = { Test-IPQChatGPT -Context $Context }
     }
+    $domains = @{
+        TikTok = @('tiktok.com')
+        DisneyPlus = @('disneyplus.com')
+        Netflix = @('netflix.com')
+        YouTubePremium = @('www.youtube.com')
+        AmazonPrimeVideo = @('www.primevideo.com')
+        Reddit = @('reddit.com')
+        ChatGPT = @('chat.openai.com', 'ios.chat.openai.com', 'api.openai.com')
+    }
     $result = [ordered]@{}
     $index = 0
     foreach ($entry in $checks.GetEnumerator()) {
@@ -1012,6 +1298,11 @@ function Get-IPQMediaChecks {
         Write-Progress -Activity '检测流媒体与 AI 可用性' -Status $entry.Key -PercentComplete (($index / $checks.Count) * 100)
         try {
             $result[$entry.Key] = & $entry.Value
+            if ($result[$entry.Key].Status -notin @('Error', 'Blocked')) {
+                $unlock = Get-IPQMediaUnlockType -Domain $domains[$entry.Key] -AddressFamily $Context.AddressFamily
+                $result[$entry.Key].Type = $unlock.Type
+                $result[$entry.Key].TypeEvidence = $unlock.Evidence
+            }
         }
         catch {
             $result[$entry.Key] = New-IPQMediaResult -Name $entry.Key -Status 'Error' -Context $Context -Error $_.Exception.Message
@@ -1362,7 +1653,9 @@ function Invoke-IPQualityCheck {
             if ($Lite) {
                 $sources = @(
                     Get-IPQSourceIPInfo -Context $context -Address $address
+                    Get-IPQSourceIPRegistry -Context $context -Address $address
                     Get-IPQSourceIPApi -Context $context -Address $address
+                    Get-IPQSourceDBIP -Context $context -Address $address
                 )
             }
             else {
@@ -1370,6 +1663,7 @@ function Invoke-IPQualityCheck {
             }
         }
         $consensus = Get-IPQConsensus -Sources $sources
+        $typeAssessment = Get-IPQTypeAssessment -Sources $sources
 
         $media = [pscustomobject][ordered]@{}
         if (-not $SkipMedia) {
@@ -1437,6 +1731,19 @@ function Invoke-IPQualityCheck {
             else {
                 ''
             }
+            GeoType = if (
+                $maxMind.CountryCode -and
+                $maxMind.RegisteredCountryCode -and
+                "$($maxMind.CountryCode)" -eq "$($maxMind.RegisteredCountryCode)"
+            ) {
+                '原生IP'
+            }
+            elseif ($maxMind.CountryCode -and $maxMind.RegisteredCountryCode) {
+                '广播IP'
+            }
+            else {
+                '未知'
+            }
         }
 
         $allResults.Add([pscustomobject][ordered]@{
@@ -1453,6 +1760,7 @@ function Invoke-IPQualityCheck {
             }
             Info = $info
             DataSources = $sources
+            TypeAssessment = $typeAssessment
             Consensus = $consensus
             Media = $media
             Mail = $mail
@@ -1474,99 +1782,161 @@ function Format-IPQCell {
     return "$Value"
 }
 
+function Format-IPQFactor {
+    param([AllowNull()][object]$Value)
+    $normalized = ConvertTo-IPQBoolean $Value
+    if ($null -eq $normalized) { return '无' }
+    return $(if ($normalized) { '是' } else { '否' })
+}
+
+function ConvertTo-IPQMediaStatusLabel {
+    param([AllowEmptyString()][string]$Status)
+    switch ($Status) {
+        'Available' { return '解锁' }
+        'Blocked' { return '屏蔽' }
+        'Error' { return '失败' }
+        'Pending' { return '待支持' }
+        'OriginalsOnly' { return '仅自制' }
+        'WebOnly' { return '仅网页' }
+        'AppOnly' { return '仅APP' }
+        'Unknown' { return '未知' }
+        default { return $(if ($Status) { $Status } else { '未知' }) }
+    }
+}
+
 function Get-IPQualityReportText {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$Result)
 
     $builder = [Text.StringBuilder]::new()
-    [void]$builder.AppendLine('============================================================')
-    [void]$builder.AppendLine(" IPQuality for Windows $($Result.Head.Version)")
-    [void]$builder.AppendLine('============================================================')
-    [void]$builder.AppendLine("地址       : $($Result.Head.Address) [$($Result.Head.AddressFamily)]")
-    [void]$builder.AppendLine("网络路径   : $($Result.Head.RouteType)")
-    [void]$builder.AppendLine("检测时间   : $($Result.Head.TimeUtc)")
+    [void]$builder.AppendLine('########################################################################')
+    [void]$builder.AppendLine("                    IP质量体检报告：$($Result.Head.Address)")
+    [void]$builder.AppendLine('                 https://github.com/FinalVar/IPQuality')
+    [void]$builder.AppendLine("检测时间：$($Result.Head.TimeUtc)  Windows版：$($Result.Head.Version)")
+    [void]$builder.AppendLine("地址族：$($Result.Head.AddressFamily)  网络路径：$($Result.Head.RouteType)")
+    [void]$builder.AppendLine('########################################################################')
     [void]$builder.AppendLine()
 
-    [void]$builder.AppendLine('[基础信息]')
-    [void]$builder.AppendLine("ASN        : $(Format-IPQCell $Result.Info.ASN)")
-    [void]$builder.AppendLine("组织       : $(Format-IPQCell $Result.Info.Organization)")
-    [void]$builder.AppendLine("位置       : $(Format-IPQCell $Result.Info.City), $(Format-IPQCell $Result.Info.Subdivision), $(Format-IPQCell $Result.Info.Country)")
-    [void]$builder.AppendLine("注册地区   : $(Format-IPQCell $Result.Info.RegisteredCountry)")
-    [void]$builder.AppendLine("时区       : $(Format-IPQCell $Result.Info.TimeZone)")
-    if ($Result.Info.Map) {
-        [void]$builder.AppendLine("地图       : $($Result.Info.Map)")
+    [void]$builder.AppendLine('一、基础信息（MaxMind 数据库）')
+    [void]$builder.AppendLine("自治系统号：            AS$(Format-IPQCell (Get-IPQValue $Result.Info 'ASN'))")
+    [void]$builder.AppendLine("组织：                  $(Format-IPQCell (Get-IPQValue $Result.Info 'Organization'))")
+    [void]$builder.AppendLine("城市：                  $(Format-IPQCell (Get-IPQValue $Result.Info 'Subdivision')), $(Format-IPQCell (Get-IPQValue $Result.Info 'City')), $(Format-IPQCell (Get-IPQValue $Result.Info 'PostalCode'))")
+    [void]$builder.AppendLine("使用地：                [$(Format-IPQCell (Get-IPQValue $Result.Info 'CountryCode'))] $(Format-IPQCell (Get-IPQValue $Result.Info 'Country')), [$(Format-IPQCell (Get-IPQValue $Result.Info 'ContinentCode'))] $(Format-IPQCell (Get-IPQValue $Result.Info 'Continent'))")
+    [void]$builder.AppendLine("注册地：                [$(Format-IPQCell (Get-IPQValue $Result.Info 'RegisteredCountryCode'))] $(Format-IPQCell (Get-IPQValue $Result.Info 'RegisteredCountry'))")
+    [void]$builder.AppendLine("时区：                  $(Format-IPQCell (Get-IPQValue $Result.Info 'TimeZone'))")
+    $map = Get-IPQValue $Result.Info 'Map' ''
+    if ($map) {
+        [void]$builder.AppendLine("地图：                  $map")
     }
-
+    [void]$builder.AppendLine("IP类型：                $(Format-IPQCell (Get-IPQValue $Result.Info 'GeoType' '未知'))")
     [void]$builder.AppendLine()
-    [void]$builder.AppendLine('[风险数据库]')
+
+    [void]$builder.AppendLine('二、IP类型属性')
     if (@($Result.DataSources).Count -eq 0) {
         [void]$builder.AppendLine('已跳过')
     }
     else {
-        [void]$builder.AppendLine('数据源          状态  国家 类型              分数   Proxy Tor VPN IDC Abuse Bot')
-        foreach ($source in $Result.DataSources) {
+        [void]$builder.AppendLine('数据库             使用类型     公司类型     原始使用类型')
+        $typeAssessment = Get-IPQValue $Result 'TypeAssessment'
+        if ($null -eq $typeAssessment) {
+            $typeAssessment = Get-IPQTypeAssessment -Sources $Result.DataSources
+        }
+        foreach ($source in $typeAssessment.Sources) {
             if (-not $source.Available) {
-                [void]$builder.AppendLine(('{0,-15} {1}' -f $source.Name, '不可用'))
+                [void]$builder.AppendLine(('{0,-18} {1}' -f $source.Name, '不可用'))
                 continue
             }
-            $score = if ($null -eq $source.Score) { '-' } else { "$($source.Score)%" }
-            $row = '{0,-15} {1,-5} {2,-4} {3,-17} {4,-6} {5,-5} {6,-3} {7,-3} {8,-3} {9,-5} {10,-3}' -f @(
-                $source.Name,
-                'OK',
-                (Format-IPQCell $source.CountryCode),
-                (Format-IPQCell $source.UsageType),
-                $score,
-                (Format-IPQCell $source.Flags.Proxy),
-                (Format-IPQCell $source.Flags.Tor),
-                (Format-IPQCell $source.Flags.VPN),
-                (Format-IPQCell $source.Flags.Server),
-                (Format-IPQCell $source.Flags.Abuser),
-                (Format-IPQCell $source.Flags.Robot)
-            )
-            [void]$builder.AppendLine($row)
+            [void]$builder.AppendLine(('{0,-18} {1,-12} {2,-12} {3}' -f $source.Name, $source.UsageLabel, $source.CompanyLabel, (Format-IPQCell $source.UsageType)))
         }
-        [void]$builder.AppendLine()
-        [void]$builder.AppendLine('交叉判定（阳性/有效数据源）:')
-        foreach ($factor in @('Proxy', 'Tor', 'VPN', 'Server', 'Abuser', 'Robot')) {
-            $item = $Result.Consensus.$factor
-            [void]$builder.AppendLine(('  {0,-7}: {1,-11} ({2}/{3})' -f $factor, $item.Verdict, $item.Positive, $item.Available))
+        [void]$builder.AppendLine("综合判断：家宽信号 $($typeAssessment.HomeSignals)，机房/CDN 信号 $($typeAssessment.DatacenterSignals)，结论：$($typeAssessment.Verdict)")
+    }
+    [void]$builder.AppendLine()
+
+    [void]$builder.AppendLine('三、风险评分')
+    $scoreSources = @($Result.DataSources | Where-Object { $_.Available -and $null -ne $_.Score })
+    if ($scoreSources.Count -eq 0) {
+        [void]$builder.AppendLine('没有可用评分')
+    }
+    else {
+        foreach ($source in $scoreSources) {
+            $riskLevel = Get-IPQValue $source 'RiskLevel' ''
+            if (-not $riskLevel) {
+                $riskLevel = Get-IPQRiskLevel -SourceName $source.Name -Score $source.Score
+            }
+            [void]$builder.AppendLine(('{0,-18}: {1,7}%  {2}' -f $source.Name, $source.Score, (Format-IPQCell $riskLevel)))
         }
     }
-
     [void]$builder.AppendLine()
-    [void]$builder.AppendLine('[流媒体与 AI]')
+
+    [void]$builder.AppendLine('四、风险因子')
+    if (@($Result.DataSources).Count -eq 0) {
+        [void]$builder.AppendLine('已跳过')
+    }
+    else {
+        [void]$builder.AppendLine('数据库             地区  代理 Tor  VPN 服务器 滥用 机器人')
+        foreach ($source in $Result.DataSources) {
+            if (-not $source.Available) {
+                [void]$builder.AppendLine(('{0,-18} {1}' -f $source.Name, '不可用'))
+                continue
+            }
+            [void]$builder.AppendLine(('{0,-18} {1,-5} {2,-4} {3,-4} {4,-4} {5,-6} {6,-4} {7}' -f @(
+                $source.Name,
+                (Format-IPQCell $source.CountryCode),
+                (Format-IPQFactor $source.Flags.Proxy),
+                (Format-IPQFactor $source.Flags.Tor),
+                (Format-IPQFactor $source.Flags.VPN),
+                (Format-IPQFactor $source.Flags.Server),
+                (Format-IPQFactor $source.Flags.Abuser),
+                (Format-IPQFactor $source.Flags.Robot)
+            )))
+        }
+        [void]$builder.AppendLine('交叉判定（阳性/有效数据源）：')
+        foreach ($factor in @('Proxy', 'Tor', 'VPN', 'Server', 'Abuser', 'Robot')) {
+            $item = $Result.Consensus.$factor
+            $verdict = switch ($item.Verdict) {
+                'Detected' { '检出' }
+                'NotDetected' { '未检出' }
+                'Mixed' { '冲突' }
+                default { '未知' }
+            }
+            [void]$builder.AppendLine(('  {0,-7}: {1,-6} ({2}/{3})' -f $factor, $verdict, $item.Positive, $item.Available))
+        }
+    }
+    [void]$builder.AppendLine()
+
+    [void]$builder.AppendLine('五、流媒体及 AI 服务解锁检测')
     if (@($Result.Media.PSObject.Properties).Count -eq 0) {
         [void]$builder.AppendLine('已跳过')
     }
     else {
+        [void]$builder.AppendLine('服务商                 状态       地区     方式')
         foreach ($property in $Result.Media.PSObject.Properties) {
             $item = $property.Value
-            [void]$builder.AppendLine(('  {0,-18}: {1,-13} {2,-4} [{3}]' -f $property.Name, $item.Status, (Format-IPQCell $item.Region), $item.Type))
+            [void]$builder.AppendLine(('{0,-22} {1,-10} {2,-8} {3}' -f $property.Name, (ConvertTo-IPQMediaStatusLabel $item.Status), (Format-IPQCell $item.Region), (Format-IPQCell $item.Type)))
         }
     }
-
     [void]$builder.AppendLine()
-    [void]$builder.AppendLine('[邮件连通性]')
+
+    [void]$builder.AppendLine('六、邮局连通性及黑名单检测')
     if ($null -eq $Result.Mail) {
-        [void]$builder.AppendLine('已跳过')
+        [void]$builder.AppendLine('邮件连通性：已跳过')
     }
     else {
-        [void]$builder.AppendLine("  任一 SMTP 25 可达: $(Format-IPQCell $Result.Mail.Port25)")
+        [void]$builder.AppendLine("本地 25 端口出站：$(if ($Result.Mail.Port25) { '可用' } else { '阻断' })")
+        [void]$builder.Append('通信：')
         foreach ($property in $Result.Mail.Services.PSObject.Properties) {
-            [void]$builder.AppendLine(('  {0,-18}: {1}' -f $property.Name, (Format-IPQCell $property.Value)))
+            [void]$builder.Append(" $($property.Name)=$(if ($property.Value) { '可用' } else { '阻断' })")
         }
+        [void]$builder.AppendLine()
     }
-
-    [void]$builder.AppendLine()
-    [void]$builder.AppendLine('[DNS 黑名单]')
     if ($null -eq $Result.DNSBlacklist) {
-        [void]$builder.AppendLine('已跳过')
+        [void]$builder.AppendLine('DNSBL：已跳过')
     }
     elseif (-not $Result.DNSBlacklist.Supported) {
-        [void]$builder.AppendLine('IPv6 暂不支持 DNSBL 反向查询')
+        [void]$builder.AppendLine('DNSBL：IPv6 暂不支持反向查询')
     }
     else {
-        [void]$builder.AppendLine("  总数: $($Result.DNSBlacklist.Total)  干净: $($Result.DNSBlacklist.Clean)  标记: $($Result.DNSBlacklist.Marked)  黑名单: $($Result.DNSBlacklist.Blacklisted)  错误: $($Result.DNSBlacklist.Errors)")
+        [void]$builder.AppendLine("IP地址黑名单数据库：总数 $($Result.DNSBlacklist.Total)  干净 $($Result.DNSBlacklist.Clean)  标记 $($Result.DNSBlacklist.Marked)  黑名单 $($Result.DNSBlacklist.Blacklisted)  错误 $($Result.DNSBlacklist.Errors)")
         foreach ($detail in $Result.DNSBlacklist.Details) {
             [void]$builder.AppendLine("  $($detail.Status): $($detail.Zone) [$($detail.Answers -join ', ')]")
         }
@@ -1579,7 +1949,7 @@ function Get-IPQualityReportText {
             [void]$builder.AppendLine("  - $warning")
         }
     }
-    [void]$builder.AppendLine('============================================================')
+    [void]$builder.AppendLine('========================================================================')
     return $builder.ToString().TrimEnd()
 }
 

@@ -12,11 +12,11 @@ This fork adds a PowerShell 7 implementation under `windows/` that does not requ
 
 - Double-click `windows/Start-IPQuality.cmd` to test the current egress.
 - Double-click `windows/Start-NodeCheck.cmd` to securely enter and test one `ss://` node.
-- Includes IPv4/IPv6, HTTP/SOCKS proxy routing, eight reputation sources, media/AI checks, SMTP, 439 unique DNSBL zones, and JSON/text reports.
+- Includes IPv4/IPv6, HTTP/SOCKS proxy routing, nine reputation sources, residential/datacenter and geo-consistency judgments, media/AI unlock type checks, SMTP, 439 unique DNSBL zones, and JSON/text reports.
 
 See the [Windows README](windows/README.md) for details.
 
-**Supported OS/Platform: Ubuntu | Debian | Linux Mint | Fedora | Red Hat Enterprise Linux (RHEL) | CentOS | Arch Linux | Manjaro | Alpine Linux | AlmaLinux | Rocky Linux | macOS | Anolis OS | Alibaba Cloud Linux | SUSE Linux | openSUSE | Void Linux | Windows (via Docker)**
+**Supported OS/Platform: Ubuntu | Debian | Linux Mint | Fedora | Red Hat Enterprise Linux (RHEL) | CentOS | Arch Linux | Manjaro | Alpine Linux | AlmaLinux | Rocky Linux | macOS | Anolis OS | Alibaba Cloud Linux | SUSE Linux | openSUSE | Void Linux | Windows (PowerShell 7 or Docker)**
 
 - Bilingual support in English and Chinese
 - Supports dual-stack queries for IPv4/IPv6

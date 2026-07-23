@@ -12,11 +12,11 @@
 
 - 双击 `windows/Start-IPQuality.cmd` 检测当前出口。
 - 双击 `windows/Start-NodeCheck.cmd` 可隐藏输入并检测单条 `ss://` 节点。
-- 支持 IPv4/IPv6、HTTP/SOCKS 代理、八个风险源、流媒体/AI、SMTP、439 个唯一 DNSBL，以及 JSON/文本报告。
+- 支持 IPv4/IPv6、HTTP/SOCKS 代理、九个风险源、家宽/机房与原生/广播判断、流媒体/AI 解锁方式、SMTP、439 个唯一 DNSBL，以及 JSON/文本报告。
 
 完整说明见 [Windows README](windows/README.md)。
 
-**支持OS/Platform：Ubuntu | Debian | Linux Mint | Fedora | Red Hat Enterprise Linux (RHEL) | CentOS | Arch Linux | Manjaro | Alpine Linux | AlmaLinux | Rocky Linux | macOS | Anolis OS | Alibaba Cloud Linux | SUSE Linux | openSUSE | Void Linux | Windows (via Docker)**
+**支持OS/Platform：Ubuntu | Debian | Linux Mint | Fedora | Red Hat Enterprise Linux (RHEL) | CentOS | Arch Linux | Manjaro | Alpine Linux | AlmaLinux | Rocky Linux | macOS | Anolis OS | Alibaba Cloud Linux | SUSE Linux | openSUSE | Void Linux | Windows (PowerShell 7 或 Docker)**
 
 - 中英文双语言支持
 - 支持IPv4/IPv6双栈查询

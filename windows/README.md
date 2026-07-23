@@ -8,8 +8,10 @@
 - HTTP、HTTPS、SOCKS4、SOCKS5、SOCKS5H 代理
 - 直接读取单条 `ss://` Shadowsocks 节点
 - MaxMind 基础信息与 ASN、地区、注册地区
-- IPinfo、Scamalytics、ipregistry、ipapi、AbuseIPDB、IP2Location、ipdata、IPQS
+- IPinfo、Scamalytics、ipregistry、ipapi、AbuseIPDB、IP2Location、ipdata、IPQS、DB-IP
+- 原生/广播 IP、家宽/机房、分库风险等级与风险因子
 - TikTok、Disney+、Netflix、YouTube Premium、Amazon Prime Video、Reddit、ChatGPT
+- 流媒体与 AI 的状态、地区及原生/DNS 解锁方式
 - 12 家邮件服务的 SMTP 25 端口连通性
 - 上游列表中的 439 个唯一 DNSBL
 - 控制台、JSON、纯文本报告
