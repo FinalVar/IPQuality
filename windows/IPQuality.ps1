@@ -25,6 +25,13 @@ $ErrorActionPreference = 'Stop'
 
 $modulePath = Join-Path $PSScriptRoot 'IPQuality.psm1'
 Import-Module $modulePath -Force
+if ($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
+    try {
+        $Host.UI.RawUI.WindowTitle = if ($Lite) { 'IPQuality Lite - 正在检测' } else { 'IPQuality Full - 正在检测' }
+    }
+    catch {
+    }
+}
 
 if ($IPv4 -and -not $IPv6) {
     $families = @(4)
@@ -64,8 +71,18 @@ try {
         $rendered
     }
     else {
+        if ($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
+            Clear-Host
+        }
         foreach ($result in $results) {
             Format-IPQualityReport -Result $result
+        }
+        if ($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
+            try {
+                $Host.UI.RawUI.WindowTitle = if ($Lite) { 'IPQuality Lite - 检测结果' } else { 'IPQuality Full - 检测结果' }
+            }
+            catch {
+            }
         }
     }
 

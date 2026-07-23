@@ -12,6 +12,7 @@
 - 原生/广播 IP、家宽/机房、分库风险等级与风险因子
 - TikTok、Disney+、Netflix、YouTube Premium、Amazon Prime Video、Reddit、ChatGPT
 - 流媒体与 AI 的状态、地区及原生/DNS 解锁方式
+- 接近上游的 72 列彩色六模块布局；窄终端自动退回纵向文本
 - 12 家邮件服务的 SMTP 25 端口连通性
 - 上游列表中的 439 个唯一 DNSBL
 - 控制台、JSON、纯文本报告

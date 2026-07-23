@@ -76,6 +76,12 @@ Assert-Equal $parserErrors 0 '所有 PowerShell 文件应通过语法解析'
     if ((Get-IPQRiskLevel -SourceName IPQS -Score 92) -ne '高风险') {
         throw 'IPQS 高分风险等级映射失败'
     }
+    if ((Get-IPQDisplayWidth '家宽') -ne 4) {
+        throw '控制台布局应按双宽计算中文字符'
+    }
+    if ((Get-IPQDisplayWidth (Format-IPQFixedWidth -Text '家宽' -Width 8 -Align Center)) -ne 8) {
+        throw '控制台固定宽度单元格应保持目标显示宽度'
+    }
 }
 
 function ConvertTo-TestBase64Url {
@@ -160,6 +166,9 @@ Assert-True ($reportText -match '二、IP类型属性') '报告应包含原版 I
 Assert-True ($reportText -match '结论：家宽') '报告应显示家宽综合判断'
 Assert-True ($reportText -match '五、流媒体及 AI 服务解锁检测') '报告应包含流媒体与 AI 模块'
 Assert-True ($reportText -match 'ChatGPT.+解锁.+US.+原生') 'ChatGPT 应显示状态、地区和解锁方式'
+$prettyOutput = (& { Format-IPQualityReport -Result $syntheticResult } 6>&1 | Out-String)
+Assert-True ($prettyOutput -match '二、IP类型属性') '彩色控制台报告应包含 IP 类型矩阵'
+Assert-True ($prettyOutput -match '五、流媒体及 AI 服务解锁检测') '彩色控制台报告应包含流媒体矩阵'
 
 $offlineTemporaryRoot = Join-Path ([IO.Path]::GetTempPath()) "ipquality-test-$([Guid]::NewGuid().ToString('N'))"
 [void](New-Item -ItemType Directory -Path $offlineTemporaryRoot)
@@ -170,6 +179,7 @@ try {
     Export-IPQualityReport -Result @($syntheticResult) -Path $textPath
     Assert-True (Test-Path -LiteralPath $jsonPath) 'JSON 报告应生成'
     Assert-True (Test-Path -LiteralPath $textPath) '文本报告应生成'
+    Assert-True ((Get-Content -LiteralPath $textPath -Raw) -notmatch [char]27) '文本报告不得包含 ANSI 控制字符'
     $json = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
     Assert-Equal $json.Head.AddressFamily 'IPv4' 'JSON 报告结构'
 }
