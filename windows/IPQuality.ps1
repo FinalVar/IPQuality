@@ -83,12 +83,16 @@ namespace IPQuality {
         $targetHeight = [Math]::Min(49, $maximum.Height)
         $buffer = $Host.UI.RawUI.BufferSize
         $buffer.Width = [Math]::Max($buffer.Width, $targetWidth)
-        $buffer.Height = [Math]::Max($buffer.Height, 200)
+        $buffer.Height = [Math]::Max($buffer.Height, $targetHeight)
         $Host.UI.RawUI.BufferSize = $buffer
         $window = $Host.UI.RawUI.WindowSize
         $window.Width = $targetWidth
         $window.Height = $targetHeight
         $Host.UI.RawUI.WindowSize = $window
+        $buffer = $Host.UI.RawUI.BufferSize
+        $buffer.Width = $Host.UI.RawUI.WindowSize.Width
+        $buffer.Height = $Host.UI.RawUI.WindowSize.Height
+        $Host.UI.RawUI.BufferSize = $buffer
     }
     catch {
     }
@@ -149,7 +153,7 @@ try {
 
     if ($Output) {
         Export-IPQualityReport -Result $results -Path $Output -Force:$Force
-        Write-Host "`n报告已保存：$([IO.Path]::GetFullPath($Output))" -ForegroundColor Green
+        Write-Host "报告已保存：$([IO.Path]::GetFullPath($Output))" -ForegroundColor Green
     }
 }
 catch {
