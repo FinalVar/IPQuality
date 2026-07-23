@@ -6,6 +6,16 @@
 
 ## IP Quality Check Script  -  [IP质量体检脚本 (中文)](https://github.com/xykt/IPQuality/blob/main/README.md)
 
+### Native Windows edition
+
+This fork adds a PowerShell 7 implementation under `windows/` that does not require Docker or WSL.
+
+- Double-click `windows/Start-IPQuality.cmd` to test the current egress.
+- Double-click `windows/Start-NodeCheck.cmd` to securely enter and test one `ss://` node.
+- Includes IPv4/IPv6, HTTP/SOCKS proxy routing, eight reputation sources, media/AI checks, SMTP, 439 unique DNSBL zones, and JSON/text reports.
+
+See the [Windows README](windows/README.md) for details.
+
 **Supported OS/Platform: Ubuntu | Debian | Linux Mint | Fedora | Red Hat Enterprise Linux (RHEL) | CentOS | Arch Linux | Manjaro | Alpine Linux | AlmaLinux | Rocky Linux | macOS | Anolis OS | Alibaba Cloud Linux | SUSE Linux | openSUSE | Void Linux | Windows (via Docker)**
 
 - Bilingual support in English and Chinese

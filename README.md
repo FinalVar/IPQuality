@@ -6,6 +6,16 @@
 
 ## IP质量体检脚本  -  [IP Quality Check Script (EN)](https://github.com/xykt/IPQuality/blob/main/README_EN.md)
 
+### Windows 原生版
+
+本 fork 新增了无需 Docker/WSL 的 PowerShell 7 实现，位于 `windows/`：
+
+- 双击 `windows/Start-IPQuality.cmd` 检测当前出口。
+- 双击 `windows/Start-NodeCheck.cmd` 可隐藏输入并检测单条 `ss://` 节点。
+- 支持 IPv4/IPv6、HTTP/SOCKS 代理、八个风险源、流媒体/AI、SMTP、439 个唯一 DNSBL，以及 JSON/文本报告。
+
+完整说明见 [Windows README](windows/README.md)。
+
 **支持OS/Platform：Ubuntu | Debian | Linux Mint | Fedora | Red Hat Enterprise Linux (RHEL) | CentOS | Arch Linux | Manjaro | Alpine Linux | AlmaLinux | Rocky Linux | macOS | Anolis OS | Alibaba Cloud Linux | SUSE Linux | openSUSE | Void Linux | Windows (via Docker)**
 
 - 中英文双语言支持
