@@ -1,7 +1,7 @@
 #Requires -Version 7.2
 Set-StrictMode -Version Latest
 
-$script:IPQualityVersion = '0.5.0'
+$script:IPQualityVersion = '0.6.0'
 $script:UpstreamVersion = 'unknown'
 
 function New-IPQUpstreamUserAgent {

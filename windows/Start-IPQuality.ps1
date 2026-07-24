@@ -15,7 +15,7 @@ param(
     [string]$Output,
     [ValidateRange(2, 60)][int]$TimeoutSeconds = 10,
     [ValidateRange(1, 100)][int]$DnsblConcurrency = 40,
-    [ValidateRange(8, 32)][int]$ConsoleFontSize = 22
+    [ValidateRange(8, 32)][int]$ConsoleFontSize = 18
 )
 
 Set-StrictMode -Version Latest

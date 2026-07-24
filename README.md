@@ -10,9 +10,18 @@
 
 本 fork 新增了无需 Docker/WSL 的 PowerShell 7 实现，位于 `windows/`：
 
-- 双击 `windows/Start-IPQuality.cmd` 检测当前出口。
+- 下载并解压
+  [`windows-native` 分支 ZIP](https://github.com/FinalVar/IPQuality/archive/refs/heads/windows-native.zip)，
+  双击根目录的 `Install.cmd` 即可完成安装。
+- 安装器会复制到当前用户的长期目录、自动把命令入口加入用户 `PATH`；
+  以后在 PowerShell、CMD 或“运行”窗口输入 `ipq` 即可检测当前节点。
+- 重复运行 `Install.cmd` 会原地升级，并保留历史报告。
+- 双击源码包或安装目录中的 `Uninstall.cmd` 可卸载；默认保留报告和再次彻底
+  卸载所需的小入口，增加 `-PurgeReports` 才会一并删除。
 - 双击 `windows/Start-NodeCheck.cmd` 可隐藏输入并检测单条 `ss://` 节点。
 - 支持 IPv4/IPv6、HTTP/SOCKS 代理、九个风险源、家宽/机房与原生/广播判断、流媒体/AI 解锁方式、SMTP、439 个唯一 DNSBL，以及 JSON/文本报告。
+- 在屏幕尺寸允许时，独立窗口会从 18 号 Consolas 向下自动选择能完整显示
+  报告的最大字号，并保持无水平、垂直滚动条。
 
 完整说明见 [Windows README](windows/README.md)。
 

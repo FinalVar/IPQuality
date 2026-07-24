@@ -19,7 +19,7 @@ param(
     [ValidateRange(1, 100)]
     [int]$DnsblConcurrency = 40,
     [ValidateRange(8, 32)]
-    [int]$ConsoleFontSize = 22
+    [int]$ConsoleFontSize = 18
 )
 
 Set-StrictMode -Version Latest
@@ -27,6 +27,7 @@ $ErrorActionPreference = 'Stop'
 
 $modulePath = Join-Path $PSScriptRoot 'IPQuality.psm1'
 Import-Module $modulePath -Force
+$script:IPQSelectedConsoleFontSize = $null
 
 function Set-IPQConsoleLayout {
     if ($Host.Name -ne 'ConsoleHost' -or [Console]::IsOutputRedirected) {
@@ -96,7 +97,36 @@ namespace IPQuality {
 '@
         }
         [IPQuality.NativeConsole]::RestoreWindow()
-        [IPQuality.NativeConsole]::SetFont([int16]$ConsoleFontSize) | Out-Null
+
+        if ($null -eq $script:IPQSelectedConsoleFontSize) {
+            for (
+                $candidate = $ConsoleFontSize;
+                $candidate -ge 8;
+                $candidate--
+            ) {
+                if (
+                    -not [IPQuality.NativeConsole]::SetFont(
+                        [int16]$candidate
+                    )
+                ) {
+                    continue
+                }
+                $candidateMaximum = $Host.UI.RawUI.MaxPhysicalWindowSize
+                if (
+                    $candidateMaximum.Width -ge 74 -and
+                    $candidateMaximum.Height -ge 47
+                ) {
+                    $script:IPQSelectedConsoleFontSize = $candidate
+                    break
+                }
+            }
+            if ($null -eq $script:IPQSelectedConsoleFontSize) {
+                $script:IPQSelectedConsoleFontSize = 8
+            }
+        }
+        [IPQuality.NativeConsole]::SetFont(
+            [int16]$script:IPQSelectedConsoleFontSize
+        ) | Out-Null
 
         $maximum = $Host.UI.RawUI.MaxPhysicalWindowSize
         $targetWidth = [Math]::Min(74, $maximum.Width)

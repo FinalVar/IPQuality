@@ -10,9 +10,22 @@
 
 This fork adds a PowerShell 7 implementation under `windows/` that does not require Docker or WSL.
 
-- Double-click `windows/Start-IPQuality.cmd` to test the current egress.
+- Download and extract the
+  [`windows-native` branch ZIP](https://github.com/FinalVar/IPQuality/archive/refs/heads/windows-native.zip),
+  then double-click `Install.cmd`.
+- The installer copies the runtime to a per-user location and adds the `ipq`
+  launcher to the user `PATH`. Afterwards, type `ipq` in PowerShell, Command
+  Prompt, or the Windows Run dialog to test the active node.
+- Running `Install.cmd` again performs an in-place upgrade without deleting
+  existing reports.
+- `Uninstall.cmd` in either the extracted source or installation directory
+  removes the runtime while preserving reports and the small purge entry points
+  by default; pass `-PurgeReports` only when those reports should also be deleted.
 - Double-click `windows/Start-NodeCheck.cmd` to securely enter and test one `ss://` node.
 - Includes IPv4/IPv6, HTTP/SOCKS proxy routing, nine reputation sources, residential/datacenter and geo-consistency judgments, media/AI unlock type checks, SMTP, 439 unique DNSBL zones, and JSON/text reports.
+- When the display permits it, the result window automatically chooses the
+  largest Consolas font up to 18 that can display the complete report without
+  horizontal or vertical scrollbars.
 
 See the [Windows README](windows/README.md) for details.
 

@@ -29,18 +29,22 @@ function Assert-True {
 }
 
 $windowsRoot = Split-Path -Parent $PSScriptRoot
+$repositoryRoot = Split-Path -Parent $windowsRoot
 $modulePath = Join-Path $windowsRoot 'IPQuality.psm1'
 Import-Module $modulePath -Force
 $module = Get-Module IPQuality
 $entryScript = Get-Content -Raw (Join-Path $windowsRoot 'IPQuality.ps1')
 $launcherScript = Get-Content -Raw (Join-Path $windowsRoot 'Start-IPQuality.ps1')
+$installerScript = Get-Content -Raw (
+    Join-Path $windowsRoot 'Install-IPQuality.ps1'
+)
 
 Assert-True (
-    $entryScript -match '\[int\]\$ConsoleFontSize\s*=\s*22'
-) '底层入口的默认控制台字号应固定为 22'
+    $entryScript -match '\[int\]\$ConsoleFontSize\s*=\s*18'
+) '底层入口的默认控制台字号应固定为 18'
 Assert-True (
-    $launcherScript -match '\[int\]\$ConsoleFontSize\s*=\s*22'
-) '日常启动器的默认控制台字号应固定为 22'
+    $launcherScript -match '\[int\]\$ConsoleFontSize\s*=\s*18'
+) '日常启动器的默认控制台字号应固定为 18'
 $remoteDnsSocksIndex = $launcherScript.IndexOf(
     "'socks5h://127.0.0.1:7890'",
     [StringComparison]::Ordinal
@@ -65,11 +69,27 @@ Assert-True (
     $entryScript -match '\$targetHeight\s*=\s*\[Math\]::Min\(47,'
 ) '标准控制台高度应固定为 47 行'
 Assert-True (
+    $entryScript -match '\$candidateMaximum\.Height\s*-ge\s*47' -and
+    $entryScript -match '\$candidate--'
+) '控制台应从 18 号向下选择能完整容纳 47 行的最大字号'
+Assert-True (
     $entryScript -notmatch 'Write-Host\s+"报告已保存'
 ) '保存提示不得额外占用报告正文行'
+Assert-True (
+    $installerScript -match "SetEnvironmentVariable\(\s*'Path'" -and
+    $installerScript -match 'Send-IPQEnvironmentChanged'
+) '公共安装器应幂等配置用户 PATH 并广播环境变化'
 
 $parserErrors = 0
-foreach ($file in (Get-ChildItem -LiteralPath $windowsRoot -Recurse -Include *.ps1, *.psm1 -File)) {
+foreach ($file in (
+    Get-ChildItem -LiteralPath $repositoryRoot `
+        -Recurse `
+        -Include *.ps1, *.psm1 `
+        -File |
+        Where-Object {
+            $_.FullName -notmatch '\\windows\\(?:reports|tools)\\'
+        }
+)) {
     $tokens = $null
     $errors = $null
     [void][Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
@@ -319,6 +339,295 @@ finally {
     }
 }
 
+$installTemporaryRoot = Join-Path (
+    [IO.Path]::GetTempPath()
+) "ipquality-install-test-$([Guid]::NewGuid().ToString('N'))"
+try {
+    $installer = Join-Path $windowsRoot 'Install-IPQuality.ps1'
+    $firstInstall = & $installer `
+        -Destination $installTemporaryRoot `
+        -NoPath
+    Assert-True $firstInstall.Installed '隔离安装应成功'
+    Assert-True (-not $firstInstall.Upgraded) '首次隔离安装不应标为升级'
+    Assert-True (-not $firstInstall.PathAdded) 'NoPath 不得修改用户 PATH'
+    foreach ($relativePath in @(
+        '.ipquality-install.json',
+        'bin\ipq.cmd',
+        'Uninstall.cmd',
+        'Uninstall.ps1',
+        'ref\dnsbl.list',
+        'windows\Start-IPQuality.ps1',
+        'windows\Uninstall-IPQuality.ps1'
+    )) {
+        Assert-True (
+            Test-Path -LiteralPath (
+                Join-Path $installTemporaryRoot $relativePath
+            ) -PathType Leaf
+        ) "隔离安装缺少文件：$relativePath"
+    }
+    $fixtureReport = Join-Path (
+        $installTemporaryRoot
+    ) 'windows\reports\preserve-me.json'
+    [IO.File]::WriteAllText(
+        $fixtureReport,
+        '{}',
+        [Text.UTF8Encoding]::new($false)
+    )
+    $sentinelFile = Join-Path (
+        $installTemporaryRoot
+    ) 'windows\user-note.txt'
+    [IO.File]::WriteAllText(
+        $sentinelFile,
+        'keep',
+        [Text.UTF8Encoding]::new($false)
+    )
+    $refSentinel = Join-Path $installTemporaryRoot 'ref\user-ref.txt'
+    [IO.File]::WriteAllText(
+        $refSentinel,
+        'keep',
+        [Text.UTF8Encoding]::new($false)
+    )
+    $toolsSentinel = Join-Path (
+        $installTemporaryRoot
+    ) 'windows\tools\user-tool.txt'
+    [void](New-Item -ItemType Directory -Path (
+        Split-Path -Parent $toolsSentinel
+    ) -Force)
+    [IO.File]::WriteAllText(
+        $toolsSentinel,
+        'keep',
+        [Text.UTF8Encoding]::new($false)
+    )
+    $secondInstall = & $installer `
+        -Destination $installTemporaryRoot `
+        -NoPath
+    Assert-True $secondInstall.Upgraded '重复安装应识别为幂等升级'
+    Assert-True (
+        Test-Path -LiteralPath $fixtureReport -PathType Leaf
+    ) '升级不得删除既有报告'
+
+    $installedUninstaller = Join-Path (
+        $installTemporaryRoot
+    ) 'windows\Uninstall-IPQuality.ps1'
+    $uninstalled = & $installedUninstaller `
+        -Destination $installTemporaryRoot
+    Assert-True $uninstalled.Uninstalled '隔离卸载应成功'
+    Assert-True $uninstalled.ReportsPreserved '默认卸载应保留报告'
+    Assert-True (
+        Test-Path -LiteralPath $fixtureReport -PathType Leaf
+    ) '默认卸载后报告应继续存在'
+    Assert-True (
+        -not (Test-Path -LiteralPath (
+            Join-Path $installTemporaryRoot 'bin\ipq.cmd'
+        ))
+    ) '默认卸载应移除命令入口'
+    Assert-True (
+        Test-Path -LiteralPath $sentinelFile -PathType Leaf
+    ) '默认卸载不得删除 windows 目录中的非项目文件'
+    Assert-True (
+        Test-Path -LiteralPath $refSentinel -PathType Leaf
+    ) '默认卸载不得删除 ref 目录中的非项目文件'
+    Assert-True (
+        Test-Path -LiteralPath $toolsSentinel -PathType Leaf
+    ) '默认卸载不得删除 tools 目录中的非项目文件'
+    foreach ($relativePath in @(
+        'Uninstall.cmd',
+        'Uninstall.ps1',
+        'windows\Uninstall-IPQuality.ps1'
+    )) {
+        Assert-True (
+            Test-Path -LiteralPath (
+                Join-Path $installTemporaryRoot $relativePath
+            ) -PathType Leaf
+        ) "保留报告时应保留后续彻底卸载入口：$relativePath"
+    }
+
+    $reinstalled = & $installer `
+        -Destination $installTemporaryRoot `
+        -NoPath
+    Assert-True (
+        -not $reinstalled.Upgraded
+    ) '默认卸载后的再次安装应标为重新安装而不是升级'
+    Assert-True (
+        Test-Path -LiteralPath $fixtureReport -PathType Leaf
+    ) '重新安装不得删除既有报告'
+    $purged = & (Join-Path (
+        $installTemporaryRoot
+    ) 'Uninstall.ps1') `
+        -Destination $installTemporaryRoot `
+        -PurgeReports
+    Assert-True $purged.Purged 'PurgeReports 应明确标记彻底卸载'
+    Assert-True (
+        -not (Test-Path -LiteralPath $installTemporaryRoot)
+    ) '彻底卸载应删除隔离安装目录'
+}
+finally {
+    $fullTemporaryRoot = [IO.Path]::GetFullPath($installTemporaryRoot)
+    $systemTemporaryRoot = [IO.Path]::GetFullPath(
+        [IO.Path]::GetTempPath()
+    )
+    if (
+        (Test-Path -LiteralPath $fullTemporaryRoot) -and
+        $fullTemporaryRoot.StartsWith(
+            $systemTemporaryRoot,
+            [StringComparison]::OrdinalIgnoreCase
+        )
+    ) {
+        Remove-Item -LiteralPath $fullTemporaryRoot -Recurse -Force
+    }
+}
+
+$bootstrapTemporaryRoot = Join-Path (
+    [IO.Path]::GetTempPath()
+) "ipquality-bootstrap-test-$([Guid]::NewGuid().ToString('N'))"
+try {
+    $legacyPowerShell = Join-Path (
+        $env:SystemRoot
+    ) 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    & $legacyPowerShell `
+        -NoLogo `
+        -NoProfile `
+        -ExecutionPolicy Bypass `
+        -File (Join-Path $repositoryRoot 'Install.ps1') `
+        -Destination $bootstrapTemporaryRoot `
+        -NoPath *> $null
+    Assert-True (
+        $LASTEXITCODE -eq 0
+    ) 'Windows PowerShell 5.1 引导到 PowerShell 7 的安装应成功'
+    Assert-True (
+        Test-Path -LiteralPath (
+            Join-Path $bootstrapTemporaryRoot 'bin\ipq.cmd'
+        ) -PathType Leaf
+    ) '引导安装应生成 ipq 命令入口'
+    [void](& (Join-Path $bootstrapTemporaryRoot 'Uninstall.ps1') `
+        -Destination $bootstrapTemporaryRoot `
+        -PurgeReports)
+}
+finally {
+    $fullBootstrapRoot = [IO.Path]::GetFullPath($bootstrapTemporaryRoot)
+    $systemTemporaryRoot = [IO.Path]::GetFullPath(
+        [IO.Path]::GetTempPath()
+    )
+    if (
+        (Test-Path -LiteralPath $fullBootstrapRoot) -and
+        $fullBootstrapRoot.StartsWith(
+            $systemTemporaryRoot,
+            [StringComparison]::OrdinalIgnoreCase
+        )
+    ) {
+        Remove-Item -LiteralPath $fullBootstrapRoot -Recurse -Force
+    }
+}
+
+$collisionTemporaryRoot = Join-Path (
+    [IO.Path]::GetTempPath()
+) "ipquality-collision-test-$([Guid]::NewGuid().ToString('N'))"
+try {
+    [void](New-Item -ItemType Directory -Path $collisionTemporaryRoot)
+    $collisionSentinel = Join-Path $collisionTemporaryRoot 'owned-by-user.txt'
+    [IO.File]::WriteAllText(
+        $collisionSentinel,
+        'do-not-overwrite',
+        [Text.UTF8Encoding]::new($false)
+    )
+    $collisionRejected = $false
+    try {
+        [void](& (Join-Path $windowsRoot 'Install-IPQuality.ps1') `
+            -Destination $collisionTemporaryRoot `
+            -NoPath)
+    }
+    catch {
+        $collisionRejected = $true
+    }
+    Assert-True $collisionRejected (
+        '安装器必须拒绝覆盖非空且不属于 IPQuality 的目录'
+    )
+    Assert-True (
+        (Get-Content -Raw -LiteralPath $collisionSentinel) -eq
+            'do-not-overwrite'
+    ) '安装被拒绝后不得修改原有文件'
+}
+finally {
+    $fullCollisionRoot = [IO.Path]::GetFullPath($collisionTemporaryRoot)
+    $systemTemporaryRoot = [IO.Path]::GetFullPath(
+        [IO.Path]::GetTempPath()
+    )
+    if (
+        (Test-Path -LiteralPath $fullCollisionRoot) -and
+        $fullCollisionRoot.StartsWith(
+            $systemTemporaryRoot,
+            [StringComparison]::OrdinalIgnoreCase
+        )
+    ) {
+        Remove-Item -LiteralPath $fullCollisionRoot -Recurse -Force
+    }
+}
+
+$corruptManifestRoot = Join-Path (
+    [IO.Path]::GetTempPath()
+) "ipquality-corrupt-test-$([Guid]::NewGuid().ToString('N'))"
+try {
+    [void](& (Join-Path $windowsRoot 'Install-IPQuality.ps1') `
+        -Destination $corruptManifestRoot `
+        -NoPath)
+    $corruptManifestPath = Join-Path (
+        $corruptManifestRoot
+    ) '.ipquality-install.json'
+    $corruptManifest = Get-Content `
+        -Raw `
+        -LiteralPath $corruptManifestPath |
+        ConvertFrom-Json
+    $corruptManifest.RefFiles = @('..\owned-by-user.txt')
+    [IO.File]::WriteAllText(
+        $corruptManifestPath,
+        ($corruptManifest | ConvertTo-Json),
+        [Text.UTF8Encoding]::new($false)
+    )
+    $corruptRejected = $false
+    try {
+        [void](& (Join-Path (
+            $corruptManifestRoot
+        ) 'windows\Uninstall-IPQuality.ps1') `
+            -Destination $corruptManifestRoot)
+    }
+    catch {
+        $corruptRejected = $true
+    }
+    Assert-True $corruptRejected (
+        '卸载器必须在修改任何状态前拒绝异常清单文件名'
+    )
+    Assert-True (
+        Test-Path -LiteralPath (
+            Join-Path $corruptManifestRoot 'bin\ipq.cmd'
+        ) -PathType Leaf
+    ) '清单校验失败后不得删除命令入口'
+    Assert-True (
+        Test-Path -LiteralPath (
+            Join-Path $corruptManifestRoot 'windows\IPQuality.ps1'
+        ) -PathType Leaf
+    ) '清单校验失败后不得删除运行文件'
+    [void](& (Join-Path (
+        $corruptManifestRoot
+    ) 'windows\Uninstall-IPQuality.ps1') `
+        -Destination $corruptManifestRoot `
+        -PurgeReports)
+}
+finally {
+    $fullCorruptRoot = [IO.Path]::GetFullPath($corruptManifestRoot)
+    $systemTemporaryRoot = [IO.Path]::GetFullPath(
+        [IO.Path]::GetTempPath()
+    )
+    if (
+        (Test-Path -LiteralPath $fullCorruptRoot) -and
+        $fullCorruptRoot.StartsWith(
+            $systemTemporaryRoot,
+            [StringComparison]::OrdinalIgnoreCase
+        )
+    ) {
+        Remove-Item -LiteralPath $fullCorruptRoot -Recurse -Force
+    }
+}
+
 if ($Online) {
     $result = @(Invoke-IPQualityCheck -AddressFamily 4 -SkipRisk -SkipMedia -SkipMail -SkipDnsbl -TimeoutSeconds 3)
     if ($result.Count -eq 0) {
@@ -326,8 +635,19 @@ if ($Online) {
     }
     else {
         Assert-Equal $result.Count 1 '在线 IPv4 冒烟测试应产生一份结果'
-        Assert-True ([bool]$result[0].Info.ASN) '在线结果应包含 ASN'
         Assert-True ($result[0].Head.Address -match '\*') '默认报告必须掩码 IP'
+        if ($result[0].Info.SourceAvailable) {
+            Assert-True ([bool]$result[0].Info.ASN) '可用的基础信息源应返回 ASN'
+        }
+        else {
+            Assert-True (
+                [bool]$result[0].Info.SourceError
+            ) '基础信息源不可用时应保留明确错误'
+            Write-Warning (
+                'SKIP ASN: 基础信息服务当前不可用：' +
+                $result[0].Info.SourceError
+            )
+        }
     }
 }
 
