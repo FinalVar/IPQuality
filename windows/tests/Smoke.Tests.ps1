@@ -704,16 +704,21 @@ try {
     $legacyPowerShell = Join-Path (
         $env:SystemRoot
     ) 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    & $legacyPowerShell `
+    $bootstrapOutput = @(& $legacyPowerShell `
         -NoLogo `
         -NoProfile `
         -ExecutionPolicy Bypass `
         -File (Join-Path $repositoryRoot 'Install.ps1') `
         -Destination $bootstrapTemporaryRoot `
-        -NoPath *> $null
+        -NoPath 2>&1)
+    $bootstrapExitCode = $LASTEXITCODE
     Assert-True (
-        $LASTEXITCODE -eq 0
-    ) 'Windows PowerShell 5.1 引导到 PowerShell 7 的安装应成功'
+        $bootstrapExitCode -eq 0
+    ) (
+        'Windows PowerShell 5.1 引导到 PowerShell 7 的安装应成功。' +
+        "退出码：$bootstrapExitCode；输出：`n" +
+        (($bootstrapOutput | Out-String).Trim())
+    )
     Assert-True (
         Test-Path -LiteralPath (
             Join-Path $bootstrapTemporaryRoot 'bin\ipq.cmd'
