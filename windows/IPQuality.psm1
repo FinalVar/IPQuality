@@ -1,8 +1,41 @@
 #Requires -Version 7.2
 Set-StrictMode -Version Latest
 
-$script:IPQualityVersion = '0.3.1'
-$script:UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
+$script:IPQualityVersion = '0.5.0'
+$script:UpstreamVersion = 'unknown'
+
+function New-IPQUpstreamUserAgent {
+    [CmdletBinding()]
+    param()
+
+    $chromeVersions = @(
+        '145.0.0.0',
+        '144.0.0.0',
+        '143.0.0.0',
+        '142.0.0.0',
+        '141.0.0.0',
+        '140.0.0.0'
+    )
+    $firefoxVersions = @(
+        '147.0',
+        '146.0',
+        '145.0',
+        '144.0',
+        '143.0',
+        '142.0',
+        '141.0',
+        '140.0'
+    )
+    if ([Random]::Shared.Next(0, 2) -eq 0) {
+        $version = $chromeVersions[[Random]::Shared.Next(0, $chromeVersions.Count)]
+        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$version Safari/537.36"
+    }
+
+    $version = $firefoxVersions[[Random]::Shared.Next(0, $firefoxVersions.Count)]
+    return "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:$version) Gecko/20100101 Firefox/$version"
+}
+
+$script:UserAgent = New-IPQUpstreamUserAgent
 $script:SourceOrder = @(
     'IPinfo',
     'Scamalytics',
@@ -14,6 +47,22 @@ $script:SourceOrder = @(
     'IPQS',
     'DB-IP'
 )
+$script:UpstreamScriptSha256 = ''
+try {
+    $upstreamScriptPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\ip.sh'))
+    if (Test-Path -LiteralPath $upstreamScriptPath) {
+        $upstreamBytes = [IO.File]::ReadAllBytes($upstreamScriptPath)
+        $script:UpstreamScriptSha256 = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData($upstreamBytes)
+        ).ToLowerInvariant()
+        $upstreamText = [Text.Encoding]::UTF8.GetString($upstreamBytes)
+        if ($upstreamText -match '(?m)^script_version="(?<version>[^"]+)"') {
+            $script:UpstreamVersion = $Matches.version
+        }
+    }
+}
+catch {
+}
 
 function Get-IPQValue {
     [CmdletBinding()]
@@ -169,7 +218,11 @@ function Invoke-IPQRequest {
         [Collections.IDictionary]$Headers,
         [AllowNull()][string]$Body,
         [AllowEmptyString()][string]$ContentType,
-        [switch]$NoRedirect
+        [AllowEmptyString()][string]$Cookie,
+        [switch]$NoRedirect,
+        [switch]$FailOnHttpError,
+        [switch]$Tls13,
+        [switch]$DiscardBody
     )
 
     $arguments = [Collections.Generic.List[string]]::new()
@@ -177,7 +230,6 @@ function Invoke-IPQRequest {
         '--silent',
         '--show-error',
         '--compressed',
-        '--connect-timeout', [string][Math]::Min(5, $Context.TimeoutSeconds),
         '--max-time', [string]$Context.TimeoutSeconds
     )) {
         $arguments.Add($argument)
@@ -186,11 +238,23 @@ function Invoke-IPQRequest {
     if (-not $NoRedirect) {
         $arguments.Add('--location')
     }
+    if ($FailOnHttpError) {
+        $arguments.Add('--fail')
+    }
+    if ($Tls13) {
+        $arguments.Add('--tlsv1.3')
+    }
     $arguments.Add($(if ($Context.AddressFamily -eq 4) { '--ipv4' } else { '--ipv6' }))
 
     if ($Context.Proxy) {
         $arguments.Add('--proxy')
         $arguments.Add($Context.Proxy)
+    }
+    else {
+        # curl honors ALL_PROXY/HTTPS_PROXY automatically. Upstream only uses a
+        # proxy when -x is explicitly supplied, so Direct must bypass env proxies.
+        $arguments.Add('--noproxy')
+        $arguments.Add('*')
     }
     if ($Context.Interface) {
         $arguments.Add('--interface')
@@ -210,9 +274,17 @@ function Invoke-IPQRequest {
         $arguments.Add('--header')
         $arguments.Add("Content-Type: $ContentType")
     }
+    if ($Cookie) {
+        $arguments.Add('--cookie')
+        $arguments.Add($Cookie)
+    }
     if ($PSBoundParameters.ContainsKey('Body')) {
         $arguments.Add('--data-raw')
         $arguments.Add($Body)
+    }
+    if ($DiscardBody) {
+        $arguments.Add('--output')
+        $arguments.Add('NUL')
     }
 
     $marker = "__IPQ_META_$([Guid]::NewGuid().ToString('N'))__"
@@ -271,6 +343,9 @@ function Invoke-IPQRequest {
         if ($metaParts.Count -gt 1 -and $metaParts[1].Trim()) {
             $effectiveUrl = $metaParts[1].Trim()
         }
+    }
+    if (-not $stderr -and $statusCode -ge 400) {
+        $stderr = "HTTP $statusCode"
     }
 
     $result = [pscustomobject]@{
@@ -344,6 +419,97 @@ function Protect-IPQAddress {
     $groups = $parsed.ToString().Split(':')
     $visible = [Math]::Min(3, $groups.Count)
     return (($groups[0..($visible - 1)] -join ':') + ':*:*:*:*:*')
+}
+
+function ConvertTo-IPQDms {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$Latitude,
+        [AllowNull()][object]$Longitude
+    )
+
+    $latitudeNumber = 0.0
+    $longitudeNumber = 0.0
+    if (
+        -not [double]::TryParse(
+            "$Latitude",
+            [Globalization.NumberStyles]::Float,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [ref]$latitudeNumber
+        ) -or
+        -not [double]::TryParse(
+            "$Longitude",
+            [Globalization.NumberStyles]::Float,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [ref]$longitudeNumber
+        )
+    ) {
+        return ''
+    }
+
+    function ConvertTo-IPQDmsCoordinate {
+        param(
+            [double]$Coordinate,
+            [string]$PositiveDirection,
+            [string]$NegativeDirection
+        )
+
+        $direction = if ($Coordinate -lt 0) { $NegativeDirection } else { $PositiveDirection }
+        $absolute = [Math]::Abs($Coordinate)
+        $degrees = [Math]::Truncate($absolute)
+        $minutesWithFraction = ($absolute - $degrees) * 60
+        $minutes = [Math]::Truncate($minutesWithFraction)
+        $seconds = [Math]::Round(($minutesWithFraction - $minutes) * 60, 0)
+        return "$([int]$degrees)°$([int]$minutes)′$([int]$seconds)″$direction"
+    }
+
+    $latitudeDms = ConvertTo-IPQDmsCoordinate `
+        -Coordinate $latitudeNumber `
+        -PositiveDirection 'N' `
+        -NegativeDirection 'S'
+    $longitudeDms = ConvertTo-IPQDmsCoordinate `
+        -Coordinate $longitudeNumber `
+        -PositiveDirection 'E' `
+        -NegativeDirection 'W'
+    return "$longitudeDms, $latitudeDms"
+}
+
+function Get-IPQMapUrl {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$Latitude,
+        [AllowNull()][object]$Longitude,
+        [AllowNull()][object]$AccuracyRadius,
+        [ValidateSet('cn', 'en', 'jp', 'es', 'de', 'fr', 'ru', 'pt')]
+        [string]$Language = 'cn'
+    )
+
+    if (
+        [string]::IsNullOrWhiteSpace("$Latitude") -or
+        [string]::IsNullOrWhiteSpace("$Longitude")
+    ) {
+        return ''
+    }
+    $radius = 0.0
+    [void][double]::TryParse(
+        "$AccuracyRadius",
+        [Globalization.NumberStyles]::Float,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [ref]$radius
+    )
+    $zoom = if ($radius -gt 1000) {
+        12
+    }
+    elseif ($radius -gt 500) {
+        13
+    }
+    elseif ($radius -gt 250) {
+        14
+    }
+    else {
+        15
+    }
+    return "https://check.place/$Latitude,$Longitude,$zoom,$Language"
 }
 
 function New-IPQFlags {
@@ -490,31 +656,52 @@ function Get-IPQMaxMindInfo {
 
     $response = Invoke-IPQRequest -Context $Context -Uri "https://ipinfo.check.place/${Address}?lang=cn"
     $data = ConvertFrom-IPQJson $response.Body
+    $fallbackResponse = $null
+    $fallbackData = $null
     if ($null -eq $data) {
+        $fallbackResponse = Invoke-IPQRequest -Context $Context -Uri "https://ipinfo.check.place/${Address}?lang=en"
+        $fallbackData = ConvertFrom-IPQJson $fallbackResponse.Body
+    }
+    else {
+        $fallbackResponse = Invoke-IPQRequest -Context $Context -Uri "https://ipinfo.check.place/${Address}?lang=en"
+        $fallbackData = ConvertFrom-IPQJson $fallbackResponse.Body
+    }
+
+    if ($null -eq $data -and $null -eq $fallbackData) {
         return [pscustomobject][ordered]@{
             Available = $false
-            Error = if ($response.Error) { $response.Error } else { '返回内容不是有效 JSON' }
+            Error = if ($response.Error) { $response.Error } elseif ($fallbackResponse.Error) { $fallbackResponse.Error } else { '返回内容不是有效 JSON' }
         }
+    }
+
+    function Get-IPQMaxMindField {
+        param([string]$Path)
+
+        $value = Get-IPQValue $data $Path
+        if (-not [string]::IsNullOrWhiteSpace("$value") -and "$value" -ne 'null') {
+            return $value
+        }
+        return Get-IPQValue $fallbackData $Path
     }
 
     [pscustomobject][ordered]@{
         Available = $true
-        ASN = Get-IPQValue $data 'ASN.AutonomousSystemNumber'
-        Organization = Get-IPQValue $data 'ASN.AutonomousSystemOrganization'
-        City = Get-IPQValue $data 'City.Name'
-        PostalCode = Get-IPQValue $data 'City.PostalCode'
-        Latitude = Get-IPQValue $data 'City.Latitude'
-        Longitude = Get-IPQValue $data 'City.Longitude'
-        AccuracyRadius = Get-IPQValue $data 'City.AccuracyRadius'
-        TimeZone = Get-IPQValue $data 'City.Location.TimeZone'
-        SubdivisionCode = Get-IPQValue $data 'City.Subdivisions.0.IsoCode'
-        Subdivision = Get-IPQValue $data 'City.Subdivisions.0.Name'
-        CountryCode = Get-IPQValue $data 'Country.IsoCode'
-        Country = Get-IPQValue $data 'Country.Name'
-        RegisteredCountryCode = Get-IPQValue $data 'Country.RegisteredCountry.IsoCode'
-        RegisteredCountry = Get-IPQValue $data 'Country.RegisteredCountry.Name'
-        ContinentCode = Get-IPQValue $data 'City.Continent.Code'
-        Continent = Get-IPQValue $data 'City.Continent.Name'
+        ASN = Get-IPQMaxMindField 'ASN.AutonomousSystemNumber'
+        Organization = Get-IPQMaxMindField 'ASN.AutonomousSystemOrganization'
+        City = Get-IPQMaxMindField 'City.Name'
+        PostalCode = Get-IPQMaxMindField 'City.PostalCode'
+        Latitude = Get-IPQMaxMindField 'City.Latitude'
+        Longitude = Get-IPQMaxMindField 'City.Longitude'
+        AccuracyRadius = Get-IPQMaxMindField 'City.AccuracyRadius'
+        TimeZone = Get-IPQMaxMindField 'City.Location.TimeZone'
+        SubdivisionCode = Get-IPQMaxMindField 'City.Subdivisions.0.IsoCode'
+        Subdivision = Get-IPQMaxMindField 'City.Subdivisions.0.Name'
+        CountryCode = Get-IPQMaxMindField 'Country.IsoCode'
+        Country = Get-IPQMaxMindField 'Country.Name'
+        RegisteredCountryCode = Get-IPQMaxMindField 'Country.RegisteredCountry.IsoCode'
+        RegisteredCountry = Get-IPQMaxMindField 'Country.RegisteredCountry.Name'
+        ContinentCode = Get-IPQMaxMindField 'City.Continent.Code'
+        Continent = Get-IPQMaxMindField 'City.Continent.Name'
         Error = ''
     }
 }
@@ -766,22 +953,20 @@ function Get-IPQSourceIPQS {
         -Error ''
 }
 
-function Get-IPQSourceDBIP {
-    param([object]$Context, [string]$Address)
+function ConvertFrom-IPQDbIpPage {
+    [CmdletBinding()]
+    param([AllowNull()][string]$Body)
 
-    $response = Invoke-IPQRequest -Context $Context -Uri "https://db-ip.com/$Address"
-    if (-not $response.Success -or [string]::IsNullOrWhiteSpace($response.Body)) {
-        return New-IPQSourceResult -Name 'DB-IP' -Available $false -Error $(if ($response.Error) { $response.Error } else { '页面内容为空' })
+    if ([string]::IsNullOrWhiteSpace($Body)) {
+        return $null
     }
-
-    $body = $response.Body
     $countryCode = ''
-    if ($body -match '"countryCode"\s*:\s*"(?<country>[A-Z]{2})"') {
+    if ($Body -match '"countryCode"\s*:\s*"(?<country>[A-Z]{2})"') {
         $countryCode = $Matches.country
     }
 
     $riskText = ''
-    if ($body -match '(?is)Estimated threat level for this IP address is\s*<span[^>]*>(?<risk>[^<]+)<') {
+    if ($Body -match '(?is)Estimated threat level for this IP address is\s*<span[^>]*>(?<risk>[^<]+)<') {
         $riskText = $Matches.risk.Trim()
     }
     $score = switch -Regex ($riskText) {
@@ -792,10 +977,13 @@ function Get-IPQSourceDBIP {
     }
 
     $flags = New-IPQFlags
-    $crawlerIndex = $body.IndexOf('>Crawler<', [StringComparison]::OrdinalIgnoreCase)
+    $crawlerIndex = $Body.IndexOf('>Crawler<', [StringComparison]::OrdinalIgnoreCase)
     if ($crawlerIndex -ge 0) {
-        $tail = $body.Substring($crawlerIndex)
-        $matches = [regex]::Matches($tail, '(?is)<span[^>]*class=["'']sr-only["''][^>]*>\s*(?<value>Yes|No)\s*</span>')
+        $tail = $Body.Substring($crawlerIndex)
+        $matches = [regex]::Matches(
+            $tail,
+            '(?is)<span[^>]*class=["'']sr-only["''][^>]*>\s*(?<value>Yes|No)(?:\s|&nbsp;)*</span>'
+        )
         if ($matches.Count -ge 3) {
             $flags.Robot = $matches[0].Groups['value'].Value -eq 'Yes'
             $flags.Proxy = $matches[1].Groups['value'].Value -eq 'Yes'
@@ -803,13 +991,30 @@ function Get-IPQSourceDBIP {
         }
     }
 
+    return [pscustomobject][ordered]@{
+        CountryCode = $countryCode
+        RiskText = $riskText
+        Score = $score
+        Flags = $flags
+    }
+}
+
+function Get-IPQSourceDBIP {
+    param([object]$Context, [string]$Address)
+
+    $response = Invoke-IPQRequest -Context $Context -Uri "https://db-ip.com/$Address"
+    $parsed = ConvertFrom-IPQDbIpPage -Body $response.Body
+    if (-not $response.Success -or $null -eq $parsed) {
+        return New-IPQSourceResult -Name 'DB-IP' -Available $false -Error $(if ($response.Error) { $response.Error } else { '页面内容为空' })
+    }
+
     New-IPQSourceResult `
         -Name 'DB-IP' `
         -Available $true `
-        -CountryCode $countryCode `
-        -Score $score `
-        -RiskLevel (Get-IPQRiskLevel -SourceName 'DB-IP' -Score $score -Hint $riskText) `
-        -Flags $flags `
+        -CountryCode $parsed.CountryCode `
+        -Score $parsed.Score `
+        -RiskLevel (Get-IPQRiskLevel -SourceName 'DB-IP' -Score $parsed.Score -Hint $parsed.RiskText) `
+        -Flags $parsed.Flags `
         -Error ''
 }
 
@@ -1007,69 +1212,258 @@ function Test-IPQGlobalAddress {
     return (($bytes[0] -band 0xFE) -ne 0xFC)
 }
 
-function Get-IPQMediaUnlockType {
+function Get-IPQDnsServerAddresses {
+    [CmdletBinding()]
+    param([ValidateSet(4, 6)][int]$AddressFamily)
+
+    $familyName = if ($AddressFamily -eq 4) { 'IPv4' } else { 'IPv6' }
+    try {
+        return @(
+            Get-DnsClientServerAddress -AddressFamily $familyName -ErrorAction Stop |
+                Where-Object { $_.ServerAddresses } |
+                ForEach-Object ServerAddresses |
+                Where-Object { $_ } |
+                Select-Object -Unique
+        )
+    }
+    catch {
+        return @()
+    }
+}
+
+function Test-IPQUpstreamDnsAddress {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string[]]$Domain,
-        [ValidateSet(4, 6)][int]$AddressFamily
+        [Parameter(Mandatory)][string]$ResolvedAddress,
+        [AllowEmptyString()][string]$DnsServer = ''
+    )
+
+    $resolved = $null
+    if (-not [Net.IPAddress]::TryParse($ResolvedAddress, [ref]$resolved)) {
+        return $false
+    }
+    if ($resolved.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork) {
+        $bytes = $resolved.GetAddressBytes()
+        if ($bytes[0] -eq 10) { return $false }
+        if ($bytes[0] -eq 172 -and $bytes[1] -ge 16 -and $bytes[1] -le 31) { return $false }
+        if ($bytes[0] -eq 169 -and $bytes[1] -eq 254) { return $false }
+        if ($bytes[0] -eq 192 -and $bytes[1] -eq 168) { return $false }
+
+        $server = $null
+        if (
+            $DnsServer -and
+            [Net.IPAddress]::TryParse($DnsServer, [ref]$server) -and
+            $server.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork
+        ) {
+            $serverBytes = $server.GetAddressBytes()
+            if (
+                $bytes[0] -eq $serverBytes[0] -and
+                $bytes[1] -eq $serverBytes[1] -and
+                $bytes[2] -eq $serverBytes[2]
+            ) {
+                return $false
+            }
+        }
+        return $true
+    }
+
+    $text = $resolved.ToString()
+    return -not (
+        $text.StartsWith('fe8', [StringComparison]::OrdinalIgnoreCase) -or
+        $text.StartsWith('fc', [StringComparison]::OrdinalIgnoreCase) -or
+        $text.StartsWith('fd', [StringComparison]::OrdinalIgnoreCase) -or
+        $text.StartsWith('ff', [StringComparison]::OrdinalIgnoreCase)
+    )
+}
+
+function ConvertTo-IPQUpstreamUnlockType {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][bool[]]$Checks)
+
+    if ($Checks -contains $false) {
+        return 'DNS'
+    }
+    return '原生'
+}
+
+function Invoke-IPQDnsCompatibilityProbe {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Domain,
+        [ValidateSet(4, 6)][int]$AddressFamily,
+        [switch]$IncludeAnswerCount,
+        [switch]$IncludeWildcard
     )
 
     $recordType = if ($AddressFamily -eq 4) { 'A' } else { 'AAAA' }
-    foreach ($name in $Domain) {
-        try {
-            $addresses = @(
-                Resolve-DnsName -Name $name -Type $recordType -DnsOnly -ErrorAction Stop |
-                    Where-Object { $null -ne $_.PSObject.Properties['IPAddress'] } |
-                    ForEach-Object { $_.IPAddress } |
-                    Where-Object { $_ }
-            )
-        }
-        catch {
-            return [pscustomobject]@{ Type = 'DNS'; Evidence = "$name 正常域名未获得 $recordType 记录" }
-        }
-        if ($addresses.Count -eq 0 -or @($addresses | Where-Object { -not (Test-IPQGlobalAddress $_) }).Count -gt 0) {
-            return [pscustomobject]@{ Type = 'DNS'; Evidence = "$name 返回空地址、私网地址或保留地址" }
-        }
-
-        $randomName = "ipq-$([Guid]::NewGuid().ToString('N')).$name"
-        $wildcard = @()
-        try {
-            $wildcard = @(
-                Resolve-DnsName -Name $randomName -Type $recordType -DnsOnly -ErrorAction Stop |
-                    Where-Object { $null -ne $_.PSObject.Properties['IPAddress'] } |
-                    ForEach-Object { $_.IPAddress } |
-                    Where-Object { $_ }
-            )
-        }
-        catch {
-            $wildcard = @()
-        }
-        if ($wildcard.Count -gt 0) {
-            return [pscustomobject]@{ Type = 'DNS'; Evidence = "$name 的随机子域名被 DNS 合成" }
-        }
+    $answerRecords = @()
+    $addresses = @()
+    try {
+        $answerRecords = @(
+            Resolve-DnsName -Name $Domain -Type $recordType -DnsOnly -ErrorAction Stop |
+                Where-Object Section -eq 'Answer'
+        )
+        $addresses = @(
+            $answerRecords |
+                Where-Object {
+                    $_.QueryType -eq $recordType -and
+                    $null -ne $_.PSObject.Properties['IPAddress']
+                } |
+                ForEach-Object IPAddress |
+                Where-Object { $_ }
+        )
     }
-    return [pscustomobject]@{ Type = '原生'; Evidence = '正常域名解析为公网地址，随机子域名未被合成' }
+    catch {
+        $addresses = @()
+    }
+
+    $dnsServer = @(Get-IPQDnsServerAddresses -AddressFamily $AddressFamily | Select-Object -First 1)
+    $check1 = if ($addresses.Count -gt 0) {
+        Test-IPQUpstreamDnsAddress `
+            -ResolvedAddress $addresses[0] `
+            -DnsServer $(if ($dnsServer.Count -gt 0) { $dnsServer[0] } else { '' })
+    }
+    else {
+        $false
+    }
+    $checks = [Collections.Generic.List[bool]]::new()
+    $checks.Add($check1)
+
+    if ($IncludeAnswerCount) {
+        # Mirrors upstream Check_DNS_2: zero, one or two answers are classified as DNS.
+        $checks.Add($answerRecords.Count -gt 2)
+    }
+    if ($IncludeWildcard) {
+        $wildcardCount = 0
+        try {
+            $wildcardCount = @(
+                Resolve-DnsName `
+                    -Name "test$([Random]::Shared.Next(100000, 999999))$([Random]::Shared.Next(100000, 999999)).$Domain" `
+                    -Type $recordType `
+                    -DnsOnly `
+                    -ErrorAction Stop |
+                    Where-Object Section -eq 'Answer'
+            ).Count
+        }
+        catch {
+            $wildcardCount = 0
+        }
+        # Mirrors upstream Check_DNS_3: an NXDOMAIN/zero-answer response is native.
+        $checks.Add($wildcardCount -eq 0)
+    }
+
+    [pscustomobject][ordered]@{
+        Domain = $Domain
+        Type = ConvertTo-IPQUpstreamUnlockType -Checks $checks.ToArray()
+        Checks = $checks.ToArray()
+        AnswerCount = $answerRecords.Count
+    }
+}
+
+function Get-IPQMediaUnlockType {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ServiceName,
+        [ValidateSet(4, 6)][int]$AddressFamily
+    )
+
+    $specifications = @{
+        TikTok = @([pscustomobject]@{ Domain = 'tiktok.com'; AnswerCount = $false; Wildcard = $true })
+        DisneyPlus = @([pscustomobject]@{ Domain = 'disneyplus.com'; AnswerCount = $false; Wildcard = $true })
+        Netflix = @([pscustomobject]@{ Domain = 'netflix.com'; AnswerCount = $true; Wildcard = $true })
+        YouTubePremium = @([pscustomobject]@{ Domain = 'www.youtube.com'; AnswerCount = $false; Wildcard = $true })
+        AmazonPrimeVideo = @([pscustomobject]@{ Domain = 'www.primevideo.com'; AnswerCount = $false; Wildcard = $true })
+        Reddit = @([pscustomobject]@{ Domain = 'reddit.com'; AnswerCount = $true; Wildcard = $false })
+        ChatGPT = @(
+            [pscustomobject]@{ Domain = 'chat.openai.com'; AnswerCount = $true; Wildcard = $true },
+            [pscustomobject]@{ Domain = 'ios.chat.openai.com'; AnswerCount = $true; Wildcard = $true },
+            [pscustomobject]@{ Domain = 'api.openai.com'; AnswerCount = $false; Wildcard = $true }
+        )
+    }
+    if (-not $specifications.ContainsKey($ServiceName)) {
+        return [pscustomobject]@{ Type = '未知'; Evidence = '没有兼容性 DNS 规则' }
+    }
+
+    $probes = [Collections.Generic.List[object]]::new()
+    foreach ($specification in $specifications[$ServiceName]) {
+        $probes.Add((Invoke-IPQDnsCompatibilityProbe `
+            -Domain $specification.Domain `
+            -AddressFamily $AddressFamily `
+            -IncludeAnswerCount:$specification.AnswerCount `
+            -IncludeWildcard:$specification.Wildcard))
+    }
+    $type = if (@($probes | Where-Object Type -eq 'DNS').Count -gt 0) { 'DNS' } else { '原生' }
+    $evidence = ($probes | ForEach-Object {
+        "$($_.Domain):$($_.Type)(answers=$($_.AnswerCount))"
+    }) -join '; '
+    return [pscustomobject]@{ Type = $type; Evidence = $evidence }
 }
 
 function Test-IPQTikTok {
     param([object]$Context)
 
-    $headers = [ordered]@{
-        'User-Agent' = $script:UserAgent
-        'Accept-Language' = 'en'
-    }
-    $response = Invoke-IPQRequest -Context $Context -Uri 'https://www.tiktok.com/' -Headers $headers
-    if (-not $response.Success) {
-        return New-IPQMediaResult -Name 'TikTok' -Status 'Error' -Context $Context -Error $response.Error
+    $response = Invoke-IPQRequest `
+        -Context $Context `
+        -Uri 'https://www.tiktok.com/' `
+        -Headers ([ordered]@{ 'User-Agent' = $script:UserAgent })
+    if ($response.Body -match 'Please wait\.\.\.') {
+        $response = Invoke-IPQRequest `
+            -Context $Context `
+            -Uri 'https://www.tiktok.com/explore' `
+            -Headers ([ordered]@{ 'User-Agent' = $script:UserAgent })
     }
     $region = Get-IPQRegionFromText $response.Body
     if ($region) {
         return New-IPQMediaResult -Name 'TikTok' -Status 'Available' -Region $region -Context $Context -Evidence '页面返回地区字段'
     }
-    if ($response.StatusCode -in @(401, 403, 451)) {
-        return New-IPQMediaResult -Name 'TikTok' -Status 'Blocked' -Context $Context -Evidence "HTTP $($response.StatusCode)"
+
+    $fallbackHeaders = [ordered]@{
+        'User-Agent' = $script:UserAgent
+        Accept = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9'
+        'Accept-Encoding' = 'gzip'
+        'Accept-Language' = 'en'
     }
-    return New-IPQMediaResult -Name 'TikTok' -Status 'Unknown' -Context $Context -Evidence "HTTP $($response.StatusCode)，未找到地区字段"
+    $fallback = Invoke-IPQRequest `
+        -Context $Context `
+        -Uri $(if ($response.Body -match 'Please wait\.\.\.') { 'https://www.tiktok.com/explore' } else { 'https://www.tiktok.com/' }) `
+        -Headers $fallbackHeaders
+    $fallbackRegion = Get-IPQRegionFromText $fallback.Body
+    if ($fallbackRegion) {
+        return New-IPQMediaResult `
+            -Name 'TikTok' `
+            -Status 'IDCOnly' `
+            -Region $fallbackRegion `
+            -Context $Context `
+            -Evidence '官方兼容性第二次页面检测仅识别到 IDC 结果'
+    }
+
+    # The upstream fallback is sensitive to the rotating TikTok edge page.
+    # One retry against /explore avoids converting a transient empty page into
+    # a false block while preserving the same region-based decision rule.
+    $retry = Invoke-IPQRequest `
+        -Context $Context `
+        -Uri 'https://www.tiktok.com/explore' `
+        -Headers $fallbackHeaders
+    $retryRegion = Get-IPQRegionFromText $retry.Body
+    if ($retryRegion) {
+        return New-IPQMediaResult `
+            -Name 'TikTok' `
+            -Status 'IDCOnly' `
+            -Region $retryRegion `
+            -Context $Context `
+            -Evidence '官方兼容性页面重试识别到 IDC 结果'
+    }
+
+    $requestErrors = @(
+        $response.Error,
+        $fallback.Error,
+        $retry.Error
+    ) | Where-Object { $_ }
+    return New-IPQMediaResult `
+        -Name 'TikTok' `
+        -Status 'Error' `
+        -Context $Context `
+        -Error $(if ($requestErrors.Count) { $requestErrors -join '; ' } else { '页面未返回地区字段' })
 }
 
 function Test-IPQDisneyPlus {
@@ -1087,7 +1481,8 @@ function Test-IPQDisneyPlus {
         -Method POST `
         -Headers $headers `
         -ContentType 'application/json; charset=UTF-8' `
-        -Body $deviceBody
+        -Body $deviceBody `
+        -NoRedirect
     $deviceData = ConvertFrom-IPQJson $device.Body
     $assertion = Get-IPQValue $deviceData 'assertion'
     if (-not $device.Success -or -not $assertion) {
@@ -1110,7 +1505,8 @@ function Test-IPQDisneyPlus {
         -Method POST `
         -Headers $headers `
         -ContentType 'application/x-www-form-urlencoded' `
-        -Body $exchangeBody
+        -Body $exchangeBody `
+        -NoRedirect
     $exchangeData = ConvertFrom-IPQJson $exchange.Body
     if ((Get-IPQValue $exchangeData 'error_description') -eq 'forbidden-location' -or $exchange.StatusCode -eq 403) {
         return New-IPQMediaResult -Name 'DisneyPlus' -Status 'Blocked' -Context $Context -Evidence 'forbidden-location'
@@ -1130,7 +1526,6 @@ function Test-IPQDisneyPlus {
         -Uri 'https://disney.api.edge.bamgrid.com/graph/v1/device/graphql' `
         -Method POST `
         -Headers $graphHeaders `
-        -ContentType 'application/json' `
         -Body $graphBody
     $graphData = ConvertFrom-IPQJson $graph.Body
     if ($null -eq $graphData) {
@@ -1139,13 +1534,71 @@ function Test-IPQDisneyPlus {
 
     $region = "$(Get-IPQValue $graphData 'extensions.sdk.session.location.countryCode' '')"
     $supported = ConvertTo-IPQBoolean (Get-IPQValue $graphData 'extensions.sdk.session.inSupportedLocation')
-    if ($supported -eq $true -or $region -eq 'JP') {
+    $preview = Invoke-IPQRequest `
+        -Context $Context `
+        -Uri 'https://disneyplus.com' `
+        -DiscardBody
+    $unavailable = $preview.EffectiveUrl -match 'unavailable'
+    if ($region -eq 'JP') {
         return New-IPQMediaResult -Name 'DisneyPlus' -Status 'Available' -Region $region -Context $Context -Evidence 'Disney SDK location'
     }
-    if ($region) {
+    if ($region -and $supported -eq $false -and -not $unavailable) {
         return New-IPQMediaResult -Name 'DisneyPlus' -Status 'Pending' -Region $region -Context $Context -Evidence '地区已识别但服务未标记可用'
     }
-    return New-IPQMediaResult -Name 'DisneyPlus' -Status 'Blocked' -Context $Context -Evidence '无可用地区'
+    if ($region -and $unavailable) {
+        return New-IPQMediaResult -Name 'DisneyPlus' -Status 'Blocked' -Context $Context -Evidence '预览页重定向到 unavailable'
+    }
+    if ($region -and $supported -eq $true) {
+        return New-IPQMediaResult -Name 'DisneyPlus' -Status 'Available' -Region $region -Context $Context -Evidence 'Disney SDK location'
+    }
+    if (-not $region) {
+        return New-IPQMediaResult -Name 'DisneyPlus' -Status 'Blocked' -Context $Context -Evidence '无可用地区'
+    }
+    return New-IPQMediaResult -Name 'DisneyPlus' -Status 'Error' -Context $Context -Error 'Disney+ 返回无法归类的状态'
+}
+
+function Resolve-IPQNetflixCompatibilityResult {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object[]]$Responses,
+        [Parameter(Mandatory)][object]$Context
+    )
+
+    if ($Responses.Count -ne 2 -or @($Responses | Where-Object { [string]::IsNullOrWhiteSpace($_.Body) }).Count -gt 0) {
+        $errorText = @($Responses | Where-Object Error | Select-Object -First 1).Error
+        return New-IPQMediaResult `
+            -Name 'Netflix' `
+            -Status 'Error' `
+            -Context $Context `
+            -Error $(if ($errorText) { $errorText } else { '官方兼容性片名页响应为空' })
+    }
+
+    $region = Get-IPQRegionFromText $Responses[0].Body
+    if ($region) {
+        $secondRegion = Get-IPQRegionFromText $Responses[1].Body
+        if ($secondRegion) {
+            $region = $secondRegion
+        }
+    }
+    $firstUnavailable = $Responses[0].Body -match 'Oh no!'
+    $secondUnavailable = $Responses[1].Body -match 'Oh no!'
+    if ($firstUnavailable -and $secondUnavailable) {
+        return New-IPQMediaResult `
+            -Name 'Netflix' `
+            -Status 'OriginalsOnly' `
+            -Region $region `
+            -Context $Context `
+            -Evidence '两部官方测试影片均返回 Oh no!'
+    }
+    if (-not $firstUnavailable -or -not $secondUnavailable) {
+        return New-IPQMediaResult `
+            -Name 'Netflix' `
+            -Status 'Available' `
+            -Region $region `
+            -Context $Context `
+            -Evidence '至少一部官方测试影片可访问'
+    }
+    return New-IPQMediaResult -Name 'Netflix' -Status 'Blocked' -Context $Context -Evidence '官方兼容性兜底判定'
 }
 
 function Test-IPQNetflix {
@@ -1153,51 +1606,48 @@ function Test-IPQNetflix {
 
     $headers = [ordered]@{ 'User-Agent' = $script:UserAgent }
     $responses = @(
-        (Invoke-IPQRequest -Context $Context -Uri 'https://www.netflix.com/title/81280792' -Headers $headers),
-        (Invoke-IPQRequest -Context $Context -Uri 'https://www.netflix.com/title/70143836' -Headers $headers)
+        (Invoke-IPQRequest `
+            -Context $Context `
+            -Uri 'https://www.netflix.com/title/81280792' `
+            -Headers $headers `
+            -FailOnHttpError `
+            -Tls13),
+        (Invoke-IPQRequest `
+            -Context $Context `
+            -Uri 'https://www.netflix.com/title/70143836' `
+            -Headers $headers `
+            -FailOnHttpError `
+            -Tls13)
     )
-    if (@($responses | Where-Object { -not $_.Success }).Count -gt 0) {
-        $errorText = ($responses | Where-Object Error | Select-Object -First 1).Error
-        return New-IPQMediaResult -Name 'Netflix' -Status 'Error' -Context $Context -Error $errorText
-    }
-    if (@($responses | Where-Object { $_.StatusCode -in @(403, 451) }).Count -gt 0) {
-        return New-IPQMediaResult -Name 'Netflix' -Status 'Blocked' -Context $Context -Evidence 'HTTP 拒绝'
-    }
-
-    $region = ''
-    foreach ($response in $responses) {
-        $region = Get-IPQRegionFromText $response.Body
-        if ($region) {
-            break
-        }
-    }
-    $unavailable = @($responses | Where-Object { $_.Body -match 'Oh no!|not available in your region' }).Count
-    if ($unavailable -eq $responses.Count) {
-        return New-IPQMediaResult -Name 'Netflix' -Status 'OriginalsOnly' -Region $region -Context $Context -Evidence '两部地区限定影片均不可用'
-    }
-    return New-IPQMediaResult -Name 'Netflix' -Status 'Available' -Region $region -Context $Context -Evidence '至少一部地区限定影片可访问'
+    return Resolve-IPQNetflixCompatibilityResult -Responses $responses -Context $Context
 }
 
 function Test-IPQYouTube {
     param([object]$Context)
 
     $headers = [ordered]@{
-        'User-Agent' = $script:UserAgent
         'Accept-Language' = 'en'
-        Cookie = 'CONSENT=YES+cb.20220301-11-p0.en+FX+700'
     }
-    $response = Invoke-IPQRequest -Context $Context -Uri 'https://www.youtube.com/premium' -Headers $headers
+    $cookie = 'YSC=BiCUU3-5Gdk; CONSENT=YES+cb.20220301-11-p0.en+FX+700; GPS=1; VISITOR_INFO1_LIVE=4VwPMkB7W5A; PREF=tz=Asia.Shanghai; _gcl_au=1.1.1809531354.1646633279'
+    $response = Invoke-IPQRequest `
+        -Context $Context `
+        -Uri 'https://www.youtube.com/premium' `
+        -Headers $headers `
+        -Cookie $cookie
     if (-not $response.Success) {
         return New-IPQMediaResult -Name 'YouTubePremium' -Status 'Error' -Context $Context -Error $response.Error
     }
     $region = Get-IPQRegionFromText $response.Body
-    if ($response.Body -match 'Premium is not available in your country') {
-        return New-IPQMediaResult -Name 'YouTubePremium' -Status 'Blocked' -Region $region -Context $Context -Evidence '页面明确提示地区不可用'
+    if ($response.Body -match 'www\.google\.cn') {
+        return New-IPQMediaResult -Name 'YouTubePremium' -Status 'China' -Region 'CN' -Context $Context -Evidence '页面指向 www.google.cn'
     }
-    if ($response.Body -match 'ad-free|YouTube Premium|youtubePremium') {
+    if ($response.Body -match 'Premium is not available in your country') {
+        return New-IPQMediaResult -Name 'YouTubePremium' -Status 'NoPremium' -Region $region -Context $Context -Evidence '页面明确提示 Premium 不可用'
+    }
+    if ($response.Body -match 'ad-free') {
         return New-IPQMediaResult -Name 'YouTubePremium' -Status 'Available' -Region $region -Context $Context -Evidence 'Premium 页面可访问'
     }
-    return New-IPQMediaResult -Name 'YouTubePremium' -Status 'Unknown' -Region $region -Context $Context -Evidence "HTTP $($response.StatusCode)"
+    return New-IPQMediaResult -Name 'YouTubePremium' -Status 'Error' -Region $region -Context $Context -Error '页面未出现官方 ad-free 判据'
 }
 
 function Test-IPQPrimeVideo {
@@ -1215,58 +1665,152 @@ function Test-IPQPrimeVideo {
     if ($response.StatusCode -in @(403, 451)) {
         return New-IPQMediaResult -Name 'AmazonPrimeVideo' -Status 'Blocked' -Context $Context -Evidence "HTTP $($response.StatusCode)"
     }
-    return New-IPQMediaResult -Name 'AmazonPrimeVideo' -Status 'Unknown' -Context $Context -Evidence '未找到地区字段'
+    return New-IPQMediaResult -Name 'AmazonPrimeVideo' -Status 'Blocked' -Context $Context -Evidence '页面未找到 currentTerritory'
 }
 
 function Test-IPQReddit {
     param([object]$Context)
 
     $headers = [ordered]@{ 'User-Agent' = $script:UserAgent }
-    $response = Invoke-IPQRequest -Context $Context -Uri 'https://www.reddit.com/' -Headers $headers
-    if (-not $response.Success) {
-        return New-IPQMediaResult -Name 'Reddit' -Status 'Error' -Context $Context -Error $response.Error
-    }
+    $response = Invoke-IPQRequest `
+        -Context $Context `
+        -Uri 'https://www.reddit.com/' `
+        -Headers $headers `
+        -FailOnHttpError
     $region = Get-IPQRegionFromText $response.Body
     switch ($response.StatusCode) {
         200 { return New-IPQMediaResult -Name 'Reddit' -Status 'Available' -Region $region -Context $Context -Evidence 'HTTP 200' }
         403 { return New-IPQMediaResult -Name 'Reddit' -Status 'Blocked' -Context $Context -Evidence 'HTTP 403' }
-        default { return New-IPQMediaResult -Name 'Reddit' -Status 'Unknown' -Region $region -Context $Context -Evidence "HTTP $($response.StatusCode)" }
+        default {
+            return New-IPQMediaResult `
+                -Name 'Reddit' `
+                -Status 'Error' `
+                -Region $region `
+                -Context $Context `
+                -Error $(if ($response.Error) { $response.Error } else { "HTTP $($response.StatusCode)" })
+        }
     }
+}
+
+function Resolve-IPQChatGPTCompatibilityResult {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Web,
+        [Parameter(Mandatory)][object]$App,
+        [AllowNull()][object]$Favicon,
+        [Parameter(Mandatory)][object]$Trace,
+        [Parameter(Mandatory)][object]$Context
+    )
+
+    $unsupportedCountry = $Web.Body -match 'unsupported_country'
+    $vpnBlocked = $App.Body -match 'VPN'
+    if ($unsupportedCountry -and $null -ne $Favicon -and $Favicon.StatusCode -ne 403) {
+        $unsupportedCountry = $false
+    }
+    $region = ''
+    if ($Trace.Body -match '(?m)^loc=(?<region>[A-Z]{2})\s*$') {
+        $region = $Matches.region
+    }
+
+    if (-not $vpnBlocked -and -not $unsupportedCountry -and $Web.Success -and $App.Success) {
+        return New-IPQMediaResult -Name 'ChatGPT' -Status 'Available' -Region $region -Context $Context -Evidence '官方 Web 与 iOS 判据均通过'
+    }
+    if ($vpnBlocked -and $unsupportedCountry) {
+        return New-IPQMediaResult -Name 'ChatGPT' -Status 'Blocked' -Context $Context -Evidence 'Web 地区限制且 iOS 返回 VPN'
+    }
+    if (-not $unsupportedCountry -and $vpnBlocked -and $Web.Success) {
+        return New-IPQMediaResult -Name 'ChatGPT' -Status 'WebOnly' -Region $region -Context $Context -Evidence '仅官方 Web 判据通过'
+    }
+    if ($unsupportedCountry -and -not $vpnBlocked) {
+        return New-IPQMediaResult -Name 'ChatGPT' -Status 'AppOnly' -Region $region -Context $Context -Evidence '仅官方 iOS 判据通过'
+    }
+    if (-not $Web.Success -and $vpnBlocked) {
+        return New-IPQMediaResult -Name 'ChatGPT' -Status 'Blocked' -Context $Context -Evidence 'Web 请求失败且 iOS 返回 VPN'
+    }
+    if ($Context.AddressFamily -eq 6 -and -not $vpnBlocked -and $App.Success) {
+        return New-IPQMediaResult -Name 'ChatGPT' -Status 'Available' -Region $region -Context $Context -Evidence '官方 IPv6 兼容性分支通过'
+    }
+    return New-IPQMediaResult `
+        -Name 'ChatGPT' `
+        -Status 'Error' `
+        -Region $region `
+        -Context $Context `
+        -Error (($Web.Error, $App.Error | Where-Object { $_ }) -join '; ')
 }
 
 function Test-IPQChatGPT {
     param([object]$Context)
 
-    $headers = [ordered]@{
-        'User-Agent' = $script:UserAgent
+    $edge119 = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0'
+    $webHeaders = [ordered]@{
+        Authority = 'api.openai.com'
         Accept = '*/*'
+        'Accept-Language' = 'zh-CN,zh;q=0.9'
+        Authorization = 'Bearer null'
+        'Content-Type' = 'application/json'
         Origin = 'https://platform.openai.com'
         Referer = 'https://platform.openai.com/'
-        Authorization = 'Bearer null'
+        'Sec-CH-UA' = '"Microsoft Edge";v="119", "Chromium";v="119", "Not?A_Brand";v="24"'
+        'Sec-CH-UA-Mobile' = '?0'
+        'Sec-CH-UA-Platform' = '"Windows"'
+        'Sec-Fetch-Dest' = 'empty'
+        'Sec-Fetch-Mode' = 'cors'
+        'Sec-Fetch-Site' = 'same-site'
+        'User-Agent' = $edge119
     }
-    $web = Invoke-IPQRequest -Context $Context -Uri 'https://api.openai.com/compliance/cookie_requirements' -Headers $headers
-    $app = Invoke-IPQRequest -Context $Context -Uri 'https://ios.chat.openai.com/' -Headers ([ordered]@{ 'User-Agent' = $script:UserAgent })
-    $trace = Invoke-IPQRequest -Context $Context -Uri 'https://chat.openai.com/cdn-cgi/trace'
-    $region = ''
-    if ($trace.Body -match '(?m)^loc=(?<region>[A-Z]{2})\s*$') {
-        $region = $Matches.region
+    $appHeaders = [ordered]@{
+        Authority = 'ios.chat.openai.com'
+        Accept = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'
+        'Accept-Language' = 'zh-CN,zh;q=0.9'
+        'Sec-CH-UA' = '"Microsoft Edge";v="119", "Chromium";v="119", "Not?A_Brand";v="24"'
+        'Sec-CH-UA-Mobile' = '?0'
+        'Sec-CH-UA-Platform' = '"Windows"'
+        'Sec-Fetch-Dest' = 'document'
+        'Sec-Fetch-Mode' = 'navigate'
+        'Sec-Fetch-Site' = 'none'
+        'Sec-Fetch-User' = '?1'
+        'Upgrade-Insecure-Requests' = '1'
+        'User-Agent' = $edge119
     }
+    $web = Invoke-IPQRequest `
+        -Context $Context `
+        -Uri 'https://api.openai.com/compliance/cookie_requirements' `
+        -Headers $webHeaders `
+        -NoRedirect
+    $app = Invoke-IPQRequest `
+        -Context $Context `
+        -Uri 'https://ios.chat.openai.com/' `
+        -Headers $appHeaders `
+        -NoRedirect
 
-    $webAllowed = $web.Success -and $web.Body -notmatch 'unsupported_country'
-    $appAllowed = $app.Success -and $app.Body -notmatch '(?i)VPN'
-    if ($webAllowed -and $appAllowed) {
-        return New-IPQMediaResult -Name 'ChatGPT' -Status 'Available' -Region $region -Context $Context -Evidence 'Web 与 iOS 端点均可用'
+    $favicon = $null
+    if ($web.Body -match 'unsupported_country') {
+        $faviconHeaders = [ordered]@{
+            Authority = 'chatgpt.com'
+            Accept = 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+            'Accept-Language' = 'zh-CN,zh;q=0.9'
+            Authorization = 'Bearer null'
+            Origin = 'https://chatgpt.com'
+            Referer = 'https://chatgpt.com/'
+            'User-Agent' = $edge119
+        }
+        $favicon = Invoke-IPQRequest `
+            -Context $Context `
+            -Uri 'https://chatgpt.com/favicon.ico' `
+            -Headers $faviconHeaders `
+            -NoRedirect `
+            -DiscardBody
     }
-    if ($webAllowed) {
-        return New-IPQMediaResult -Name 'ChatGPT' -Status 'WebOnly' -Region $region -Context $Context -Evidence '仅 Web 端点通过'
-    }
-    if ($appAllowed) {
-        return New-IPQMediaResult -Name 'ChatGPT' -Status 'AppOnly' -Region $region -Context $Context -Evidence '仅 iOS 端点通过'
-    }
-    if ($web.Success -or $app.Success) {
-        return New-IPQMediaResult -Name 'ChatGPT' -Status 'Blocked' -Region $region -Context $Context -Evidence '端点返回地区/VPN 限制'
-    }
-    return New-IPQMediaResult -Name 'ChatGPT' -Status 'Error' -Region $region -Context $Context -Error (($web.Error, $app.Error | Where-Object { $_ }) -join '; ')
+    $trace = Invoke-IPQRequest `
+        -Context $Context `
+        -Uri 'https://chat.openai.com/cdn-cgi/trace' `
+        -NoRedirect
+    return Resolve-IPQChatGPTCompatibilityResult `
+        -Web $web `
+        -App $app `
+        -Favicon $favicon `
+        -Trace $trace `
+        -Context $Context
 }
 
 function Get-IPQMediaChecks {
@@ -1282,15 +1826,6 @@ function Get-IPQMediaChecks {
         Reddit = { Test-IPQReddit -Context $Context }
         ChatGPT = { Test-IPQChatGPT -Context $Context }
     }
-    $domains = @{
-        TikTok = @('tiktok.com')
-        DisneyPlus = @('disneyplus.com')
-        Netflix = @('netflix.com')
-        YouTubePremium = @('www.youtube.com')
-        AmazonPrimeVideo = @('www.primevideo.com')
-        Reddit = @('reddit.com')
-        ChatGPT = @('chat.openai.com', 'ios.chat.openai.com', 'api.openai.com')
-    }
     $result = [ordered]@{}
     $index = 0
     foreach ($entry in $checks.GetEnumerator()) {
@@ -1299,7 +1834,7 @@ function Get-IPQMediaChecks {
         try {
             $result[$entry.Key] = & $entry.Value
             if ($result[$entry.Key].Status -notin @('Error', 'Blocked')) {
-                $unlock = Get-IPQMediaUnlockType -Domain $domains[$entry.Key] -AddressFamily $Context.AddressFamily
+                $unlock = Get-IPQMediaUnlockType -ServiceName $entry.Key -AddressFamily $Context.AddressFamily
                 $result[$entry.Key].Type = $unlock.Type
                 $result[$entry.Key].TypeEvidence = $unlock.Evidence
             }
@@ -1377,7 +1912,10 @@ function Test-IPQSmtpService {
 
 function Get-IPQMailChecks {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][object]$Context)
+    param(
+        [Parameter(Mandatory)][object]$Context,
+        [Parameter(Mandatory)][string]$Address
+    )
 
     $services = [ordered]@{
         Gmail = 'gmail.com'
@@ -1394,13 +1932,59 @@ function Get-IPQMailChecks {
         Sina = 'sina.com'
     }
 
-    $workItems = @()
+    if ($Context.Proxy) {
+        $serviceMap = [ordered]@{}
+        $details = [Collections.Generic.List[object]]::new()
+        $order = 0
+        foreach ($entry in $services.GetEnumerator()) {
+            $serviceMap[$entry.Key] = $false
+            $details.Add([pscustomobject][ordered]@{
+                Order = $order
+                Name = $entry.Key
+                Domain = $entry.Value
+                Reachable = $false
+                Host = ''
+                Error = '上游代理模式不将 SMTP 25 端口探测送入代理'
+                State = 'ProxyUnsupported'
+                Banner = ''
+            })
+            $order++
+        }
+        return [pscustomobject][ordered]@{
+            RouteType = $Context.RouteType
+            Port25 = $false
+            Port25Status = 'ProxyUnsupported'
+            SourceBinding = 'Proxy'
+            Services = [pscustomobject]$serviceMap
+            Port25Detail = [pscustomobject][ordered]@{
+                Order = -1
+                Name = '__Port25'
+                Domain = ''
+                Reachable = $false
+                Host = 'smtp.mailgun.org'
+                Error = '上游代理模式不检测本地 25 端口'
+                State = 'ProxyUnsupported'
+                Banner = ''
+            }
+            Details = $details.ToArray()
+        }
+    }
+
+    $workItems = @(
+        [pscustomobject]@{
+            Order = -1
+            Name = '__Port25'
+            Domain = ''
+            Host = 'smtp.mailgun.org'
+        }
+    )
     $order = 0
     foreach ($entry in $services.GetEnumerator()) {
         $workItems += [pscustomobject]@{
             Order = $order
             Name = $entry.Key
             Domain = $entry.Value
+            Host = ''
         }
         $order++
     }
@@ -1409,21 +1993,45 @@ function Get-IPQMailChecks {
     $family = $Context.AddressFamily
     $proxy = $Context.Proxy
     $interfaceName = $Context.Interface
+    $publicAddress = $Address
+    $publicAddressAssigned = $false
+    try {
+        $publicAddressAssigned = @(
+            Get-NetIPAddress -IPAddress $Address -ErrorAction Stop
+        ).Count -gt 0
+    }
+    catch {
+        $publicAddressAssigned = $false
+    }
+    $localPortOccupied = $false
+    try {
+        $localPortOccupied = @(
+            Get-NetTCPConnection -LocalPort 25 -ErrorAction SilentlyContinue
+        ).Count -gt 0
+    }
+    catch {
+        $localPortOccupied = $false
+    }
     Write-Progress -Activity '检测 SMTP 25 端口' -Status '并发连接邮件服务' -PercentComplete 10
     $checks = @(
         $workItems | ForEach-Object -Parallel {
             $item = $_
-            try {
+            if ($item.Host) {
+                $mxHosts = @($item.Host)
+            }
+            else {
+                try {
                 $mxHosts = @(
                     Resolve-DnsName -Name $item.Domain -Type MX -DnsOnly -ErrorAction Stop |
                         Where-Object { $_.Type -eq 'MX' -and $_.NameExchange } |
                         Sort-Object Preference |
                         ForEach-Object { $_.NameExchange.TrimEnd('.') } |
-                        Select-Object -First 2
+                        Select-Object -First 1
                 )
-            }
-            catch {
-                $mxHosts = @()
+                }
+                catch {
+                    $mxHosts = @()
+                }
             }
             if ($mxHosts.Count -eq 0) {
                 [pscustomobject]@{
@@ -1433,6 +2041,34 @@ function Get-IPQMailChecks {
                     Reachable = $false
                     Host = ''
                     Error = '未解析到 MX'
+                    State = 'Blocked'
+                    Banner = ''
+                }
+                return
+            }
+            if ($item.Name -eq '__Port25' -and $using:localPortOccupied) {
+                [pscustomobject]@{
+                    Order = $item.Order
+                    Name = $item.Name
+                    Domain = $item.Domain
+                    Reachable = $null
+                    Host = $mxHosts[0]
+                    Error = '本地端口 25 已占用'
+                    State = 'Occupied'
+                    Banner = ''
+                }
+                return
+            }
+            if ($item.Name -eq '__Port25' -and $using:proxy) {
+                [pscustomobject]@{
+                    Order = $item.Order
+                    Name = $item.Name
+                    Domain = $item.Domain
+                    Reachable = $false
+                    Host = $mxHosts[0]
+                    Error = '官方语义下代理模式不检测本地 25 端口'
+                    State = 'ProxyUnsupported'
+                    Banner = ''
                 }
                 return
             }
@@ -1456,19 +2092,44 @@ function Get-IPQMailChecks {
                         }
                         $client = [Net.Sockets.TcpClient]::new($targetFamily)
                         try {
+                            if ($using:publicAddressAssigned) {
+                                $localAddress = [Net.IPAddress]::Parse($using:publicAddress)
+                                $localPort = if ($item.Name -eq '__Port25') { 25 } else { 0 }
+                                $client.Client.Bind([Net.IPEndPoint]::new($localAddress, $localPort))
+                            }
                             $connectTask = $client.ConnectAsync($targetAddress, 25)
                             if ($connectTask.Wait(3000) -and $client.Connected) {
-                                [pscustomobject]@{
-                                    Order = $item.Order
-                                    Name = $item.Name
-                                    Domain = $item.Domain
-                                    Reachable = $true
-                                    Host = $hostName
-                                    Error = ''
+                                $stream = $client.GetStream()
+                                $stream.ReadTimeout = 4000
+                                $buffer = [byte[]]::new(1024)
+                                $banner = ''
+                                try {
+                                    $read = $stream.Read($buffer, 0, $buffer.Length)
+                                    if ($read -gt 0) {
+                                        $banner = [Text.Encoding]::ASCII.GetString($buffer, 0, $read).Trim()
+                                    }
                                 }
-                                return
+                                catch {
+                                    $lastError = $_.Exception.GetBaseException().Message
+                                }
+                                if ($banner -match '(?m)^220[\s-]') {
+                                    [pscustomobject]@{
+                                        Order = $item.Order
+                                        Name = $item.Name
+                                        Domain = $item.Domain
+                                        Reachable = $true
+                                        Host = $hostName
+                                        Error = ''
+                                        State = 'Available'
+                                        Banner = ($banner -split "`r?`n")[0]
+                                    }
+                                    return
+                                }
+                                $lastError = if ($banner) { "未收到 220：$(($banner -split "`r?`n")[0])" } elseif ($lastError) { $lastError } else { 'TCP 已连接但未收到 SMTP 220' }
                             }
-                            $lastError = 'TCP 连接超时'
+                            else {
+                                $lastError = 'TCP 连接超时'
+                            }
                         }
                         finally {
                             $client.Dispose()
@@ -1481,14 +2142,17 @@ function Get-IPQMailChecks {
                 }
 
                 $arguments = @(
-                    '--silent',
                     '--show-error',
+                    '--verbose',
                     '--connect-timeout', '3',
                     '--max-time', '5',
                     $(if ($using:family -eq 4) { '--ipv4' } else { '--ipv6' })
                 )
                 if ($using:proxy) {
                     $arguments += @('--proxy', $using:proxy)
+                }
+                else {
+                    $arguments += @('--noproxy', '*')
                 }
                 if ($using:interfaceName) {
                     $arguments += @('--interface', $using:interfaceName)
@@ -1497,7 +2161,11 @@ function Get-IPQMailChecks {
                 $output = & $using:curlPath @arguments 2>&1
                 $exitCode = $LASTEXITCODE
                 $text = ($output | Out-String).Trim()
-                if ($exitCode -in @(0, 8, 56) -or $text -match '(?m)^220[\s-]') {
+                $bannerMatch = [regex]::Match(
+                    $text,
+                    '(?m)^(?:<\s*)?(?<banner>220[\s-][^\r\n]*)'
+                )
+                if ($exitCode -eq 0 -or $bannerMatch.Success) {
                     [pscustomobject]@{
                         Order = $item.Order
                         Name = $item.Name
@@ -1505,6 +2173,8 @@ function Get-IPQMailChecks {
                         Reachable = $true
                         Host = $hostName
                         Error = ''
+                        State = 'Available'
+                        Banner = $(if ($bannerMatch.Success) { $bannerMatch.Groups['banner'].Value } else { '' })
                     }
                     return
                 }
@@ -1517,22 +2187,47 @@ function Get-IPQMailChecks {
                 Reachable = $false
                 Host = $mxHosts[0]
                 Error = $lastError
+                State = 'Blocked'
+                Banner = ''
             }
         } -ThrottleLimit 6 |
             Sort-Object Order
     )
     Write-Progress -Activity '检测 SMTP 25 端口' -Completed
 
+    $portCheck = @($checks | Where-Object Name -eq '__Port25' | Select-Object -First 1)
+    $serviceChecks = @($checks | Where-Object Name -ne '__Port25')
     $serviceMap = [ordered]@{}
-    foreach ($check in $checks) {
+    foreach ($check in $serviceChecks) {
         $serviceMap[$check.Name] = $check.Reachable
     }
     [pscustomobject][ordered]@{
         RouteType = $Context.RouteType
-        Port25 = @($checks | Where-Object Reachable).Count -gt 0
+        Port25 = $(if ($portCheck.Count -gt 0) { $portCheck[0].Reachable } else { $false })
+        Port25Status = $(if ($portCheck.Count -gt 0) { $portCheck[0].State } else { 'Blocked' })
+        SourceBinding = $(if ($Context.Proxy) {
+            'Proxy'
+        }
+        elseif ($publicAddressAssigned) {
+            'ExactPublicAddress'
+        }
+        else {
+            'NATEquivalent'
+        })
         Services = [pscustomobject]$serviceMap
-        Details = @($checks)
+        Port25Detail = $(if ($portCheck.Count -gt 0) { $portCheck[0] } else { $null })
+        Details = $serviceChecks
     }
+}
+
+function Test-IPQExpectedEmptyDnsErrorId {
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$FullyQualifiedErrorId)
+
+    return (
+        $FullyQualifiedErrorId -like 'DNS_ERROR_RCODE_NAME_ERROR,*' -or
+        $FullyQualifiedErrorId -like 'DNS_INFO_NO_RECORDS,*'
+    )
 }
 
 function Get-IPQDnsblChecks {
@@ -1571,30 +2266,45 @@ function Get-IPQDnsblChecks {
             $zone = $_
             $query = "$using:reversed.$zone"
             try {
-                $answers = @([Net.Dns]::GetHostAddresses($query) | ForEach-Object ToString)
-                if ($answers -contains '127.0.0.2') {
-                    [pscustomobject]@{ Zone = $zone; Status = 'Blacklisted'; Answers = $answers }
+                $answers = @(
+                    Resolve-DnsName `
+                        -Name $query `
+                        -Type A `
+                        -DnsOnly `
+                        -QuickTimeout `
+                        -ErrorAction Stop |
+                        Where-Object {
+                            $_.Section -eq 'Answer' -and
+                            $_.QueryType -eq 'A' -and
+                            $null -ne $_.PSObject.Properties['IPAddress']
+                        } |
+                        ForEach-Object IPAddress |
+                        Where-Object { $_ }
+                )
+                if ($answers.Count -eq 1 -and $answers[0] -eq '127.0.0.2') {
+                    [pscustomobject]@{ Zone = $zone; Status = 'Blacklisted'; Answers = $answers; HadError = $false; Error = '' }
                 }
                 elseif ($answers.Count -gt 0) {
-                    [pscustomobject]@{ Zone = $zone; Status = 'Marked'; Answers = $answers }
+                    [pscustomobject]@{ Zone = $zone; Status = 'Marked'; Answers = $answers; HadError = $false; Error = '' }
                 }
                 else {
-                    [pscustomobject]@{ Zone = $zone; Status = 'Clean'; Answers = @() }
-                }
-            }
-            catch [Net.Sockets.SocketException] {
-                if ($_.Exception.SocketErrorCode -in @(
-                    [Net.Sockets.SocketError]::HostNotFound,
-                    [Net.Sockets.SocketError]::NoData
-                )) {
-                    [pscustomobject]@{ Zone = $zone; Status = 'Clean'; Answers = @() }
-                }
-                else {
-                    [pscustomobject]@{ Zone = $zone; Status = 'Error'; Answers = @(); Error = $_.Exception.SocketErrorCode.ToString() }
+                    [pscustomobject]@{ Zone = $zone; Status = 'Clean'; Answers = @(); HadError = $false; Error = '' }
                 }
             }
             catch {
-                [pscustomobject]@{ Zone = $zone; Status = 'Error'; Answers = @(); Error = $_.Exception.Message }
+                # ForEach-Object -Parallel runs in an isolated runspace, so keep
+                # this small predicate local instead of calling a module helper.
+                $isExpectedEmpty = (
+                    $_.FullyQualifiedErrorId -like 'DNS_ERROR_RCODE_NAME_ERROR,*' -or
+                    $_.FullyQualifiedErrorId -like 'DNS_INFO_NO_RECORDS,*'
+                )
+                [pscustomobject]@{
+                    Zone = $zone
+                    Status = 'Clean'
+                    Answers = @()
+                    HadError = -not $isExpectedEmpty
+                    Error = $(if ($isExpectedEmpty) { '' } else { $_.Exception.Message })
+                }
             }
         } -ThrottleLimit $Concurrency
     )
@@ -1606,8 +2316,8 @@ function Get-IPQDnsblChecks {
         Clean = @($checks | Where-Object Status -eq 'Clean').Count
         Marked = @($checks | Where-Object Status -eq 'Marked').Count
         Blacklisted = @($checks | Where-Object Status -eq 'Blacklisted').Count
-        Errors = @($checks | Where-Object Status -eq 'Error').Count
-        Details = @($checks | Where-Object Status -ne 'Clean' | Sort-Object Status, Zone)
+        Errors = @($checks | Where-Object HadError).Count
+        Details = @($checks | Where-Object { $_.Status -ne 'Clean' -or $_.HadError } | Sort-Object Status, Zone)
     }
 }
 
@@ -1672,7 +2382,7 @@ function Invoke-IPQualityCheck {
 
         $mail = $null
         if (-not $SkipMail) {
-            $mail = Get-IPQMailChecks -Context $context
+            $mail = Get-IPQMailChecks -Context $context -Address $address
         }
 
         $dnsbl = $null
@@ -1707,38 +2417,58 @@ function Invoke-IPQualityCheck {
                 }
             }
         }
+        if (
+            -not $SkipMail -and
+            $null -ne $mail -and
+            $mail.SourceBinding -eq 'NATEquivalent'
+        ) {
+            $warnings.Add('SMTP：出口公网 IP 不在本机网卡上，采用 NAT 等价探测；避免官方 Docker 的源地址绑定假失败')
+        }
+        if (
+            -not $SkipDnsbl -and
+            $null -ne $dnsbl -and
+            $dnsbl.Errors -gt 0
+        ) {
+            $warnings.Add("DNSBL：$($dnsbl.Errors) 项查询异常；按官方 dig 空响应语义计入正常，并在 JSON 中保留错误")
+        }
 
+        $latitude = Get-IPQValue $maxMind 'Latitude'
+        $longitude = Get-IPQValue $maxMind 'Longitude'
+        $accuracyRadius = Get-IPQValue $maxMind 'AccuracyRadius'
+        $countryCode = Get-IPQValue $maxMind 'CountryCode'
+        $registeredCountryCode = Get-IPQValue $maxMind 'RegisteredCountryCode'
         $info = [pscustomobject][ordered]@{
-            ASN = $maxMind.ASN
-            Organization = $maxMind.Organization
-            City = $maxMind.City
-            PostalCode = $maxMind.PostalCode
-            SubdivisionCode = $maxMind.SubdivisionCode
-            Subdivision = $maxMind.Subdivision
-            CountryCode = $maxMind.CountryCode
-            Country = $maxMind.Country
-            RegisteredCountryCode = $maxMind.RegisteredCountryCode
-            RegisteredCountry = $maxMind.RegisteredCountry
-            ContinentCode = $maxMind.ContinentCode
-            Continent = $maxMind.Continent
-            Latitude = $maxMind.Latitude
-            Longitude = $maxMind.Longitude
-            AccuracyRadiusKm = $maxMind.AccuracyRadius
-            TimeZone = $maxMind.TimeZone
-            Map = if ($maxMind.Latitude -and $maxMind.Longitude) {
-                "https://www.google.com/maps?q=$($maxMind.Latitude),$($maxMind.Longitude)"
-            }
-            else {
-                ''
-            }
+            SourceAvailable = $maxMind.Available
+            SourceError = Get-IPQValue $maxMind 'Error'
+            ASN = Get-IPQValue $maxMind 'ASN'
+            Organization = Get-IPQValue $maxMind 'Organization'
+            City = Get-IPQValue $maxMind 'City'
+            PostalCode = Get-IPQValue $maxMind 'PostalCode'
+            SubdivisionCode = Get-IPQValue $maxMind 'SubdivisionCode'
+            Subdivision = Get-IPQValue $maxMind 'Subdivision'
+            CountryCode = $countryCode
+            Country = Get-IPQValue $maxMind 'Country'
+            RegisteredCountryCode = $registeredCountryCode
+            RegisteredCountry = Get-IPQValue $maxMind 'RegisteredCountry'
+            ContinentCode = Get-IPQValue $maxMind 'ContinentCode'
+            Continent = Get-IPQValue $maxMind 'Continent'
+            Latitude = $latitude
+            Longitude = $longitude
+            DMS = ConvertTo-IPQDms -Latitude $latitude -Longitude $longitude
+            AccuracyRadiusKm = $accuracyRadius
+            TimeZone = Get-IPQValue $maxMind 'TimeZone'
+            Map = Get-IPQMapUrl `
+                -Latitude $latitude `
+                -Longitude $longitude `
+                -AccuracyRadius $accuracyRadius
             GeoType = if (
-                $maxMind.CountryCode -and
-                $maxMind.RegisteredCountryCode -and
-                "$($maxMind.CountryCode)" -eq "$($maxMind.RegisteredCountryCode)"
+                $countryCode -and
+                $registeredCountryCode -and
+                "$countryCode" -eq "$registeredCountryCode"
             ) {
                 '原生IP'
             }
-            elseif ($maxMind.CountryCode -and $maxMind.RegisteredCountryCode) {
+            elseif ($countryCode -and $registeredCountryCode) {
                 '广播IP'
             }
             else {
@@ -1750,13 +2480,23 @@ function Invoke-IPQualityCheck {
             Head = [pscustomobject][ordered]@{
                 Tool = 'IPQuality for Windows'
                 Version = $script:IPQualityVersion
+                UpstreamVersion = $script:UpstreamVersion
                 Upstream = 'https://github.com/xykt/IPQuality'
                 TimeUtc = [DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss UTC')
+                TimeLocal = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') CST"
                 Address = $displayAddress
                 AddressFamily = "IPv$family"
                 RouteType = $context.RouteType
                 DiscoveryEndpoint = $public.Endpoint
                 Privacy = if ($FullIP) { 'FullAddress' } else { 'MaskedAddress' }
+                UserAgent = $script:UserAgent
+                CompatibilityBaseline = $(if ($script:UpstreamScriptSha256) {
+                    "xykt/IPQuality ip.sh sha256:$($script:UpstreamScriptSha256)"
+                }
+                else {
+                    'xykt/IPQuality ip.sh (hash unavailable)'
+                })
+                ProxyPolicy = 'ExplicitOnly'
             }
             Info = $info
             DataSources = $sources
@@ -1797,10 +2537,23 @@ function ConvertTo-IPQMediaStatusLabel {
         'Error' { return '失败' }
         'Pending' { return '待支持' }
         'OriginalsOnly' { return '仅自制' }
+        'NoPremium' { return '禁会员' }
+        'China' { return '中国' }
+        'IDCOnly' { return '机房' }
         'WebOnly' { return '仅网页' }
         'AppOnly' { return '仅APP' }
         'Unknown' { return '未知' }
         default { return $(if ($Status) { $Status } else { '未知' }) }
+    }
+}
+
+function ConvertTo-IPQPort25StatusLabel {
+    param([AllowEmptyString()][string]$Status)
+    switch ($Status) {
+        'Available' { return '可用' }
+        'Occupied' { return '占用' }
+        'ProxyUnsupported' { return '代理不测' }
+        default { return '阻断' }
     }
 }
 
@@ -1922,7 +2675,13 @@ function Get-IPQualityReportText {
         [void]$builder.AppendLine('邮件连通性：已跳过')
     }
     else {
-        [void]$builder.AppendLine("本地 25 端口出站：$(if ($Result.Mail.Port25) { '可用' } else { '阻断' })")
+        $port25Status = if ($null -ne $Result.Mail.PSObject.Properties['Port25Status']) {
+            ConvertTo-IPQPort25StatusLabel $Result.Mail.Port25Status
+        }
+        else {
+            $(if ($Result.Mail.Port25) { '可用' } else { '阻断' })
+        }
+        [void]$builder.AppendLine("本地 25 端口出站：$port25Status")
         [void]$builder.Append('通信：')
         foreach ($property in $Result.Mail.Services.PSObject.Properties) {
             [void]$builder.Append(" $($property.Name)=$(if ($property.Value) { '可用' } else { '阻断' })")
@@ -1998,7 +2757,7 @@ function Get-IPQBadgeColor {
 
     switch -Regex ("$Value") {
         '^(家宽|手机|原生|原生IP|解锁|可用|干净|否|未检出|极低风险|低风险)$' { return 'DarkGreen' }
-        '^(机房|CDN|广播IP|屏蔽|失败|阻断|黑名单|是|检出|高风险|极高风险|建议封禁)$' { return 'DarkRed' }
+        '^(机房|CDN|广播IP|屏蔽|失败|阻断|黑名单|是|检出|中国|禁会员|高风险|极高风险|建议封禁)$' { return 'DarkRed' }
         '^(商业|教育|政府|银行|组织|军队|图书馆|其他|DNS|待支持|仅自制|仅网页|仅APP|标记|冲突|较高风险|中风险|可疑IP|存在风险)$' { return 'DarkYellow' }
         default { return 'DarkGray' }
     }
@@ -2196,9 +2955,11 @@ function Write-IPQPrettyReport {
     $separator = '#' * $lineWidth
     Write-Host $separator -ForegroundColor DarkGray
     Write-Host (Format-IPQFixedWidth -Text "IP质量体检报告：$($Result.Head.Address)" -Width $lineWidth -Align Center) -ForegroundColor Green
-    Write-Host (Format-IPQFixedWidth -Text 'https://github.com/FinalVar/IPQuality' -Width $lineWidth -Align Center) -ForegroundColor DarkCyan
-    Write-Host (Format-IPQFixedWidth -Text 'pwsh .\windows\IPQuality.ps1 -IPv4' -Width $lineWidth -Align Center) -ForegroundColor Gray
-    Write-Host (Format-IPQFixedWidth -Text "报告时间：$($Result.Head.TimeUtc)  版本：$($Result.Head.Version)" -Width $lineWidth -Align Center) -ForegroundColor Gray
+    Write-Host (Format-IPQFixedWidth -Text 'https://github.com/xykt/IPQuality' -Width $lineWidth -Align Center) -ForegroundColor DarkCyan
+    Write-Host (Format-IPQFixedWidth -Text 'ipq' -Width $lineWidth -Align Center) -ForegroundColor Gray
+    $reportTime = Get-IPQValue $Result.Head 'TimeLocal' (Get-IPQValue $Result.Head 'TimeUtc')
+    $upstreamVersion = Get-IPQValue $Result.Head 'UpstreamVersion' (Get-IPQValue $Result.Head 'Version')
+    Write-Host (Format-IPQFixedWidth -Text "报告时间：$reportTime  脚本版本：$upstreamVersion" -Width $lineWidth -Align Center) -ForegroundColor Gray
     Write-Host $separator -ForegroundColor DarkGray
 
     Write-IPQSectionTitle '一、基础信息（Maxmind 数据库）'
@@ -2209,10 +2970,9 @@ function Write-IPQPrettyReport {
         (Get-IPQValue $Result.Info 'City'),
         (Get-IPQValue $Result.Info 'PostalCode')
     ) | Where-Object { $_ }
-    $latitude = Get-IPQValue $Result.Info 'Latitude'
-    $longitude = Get-IPQValue $Result.Info 'Longitude'
-    if ($latitude -and $longitude) {
-        Write-IPQKeyValue '坐标：' "$latitude, $longitude"
+    $dms = Get-IPQValue $Result.Info 'DMS'
+    if ($dms) {
+        Write-IPQKeyValue '坐标：' $dms
     }
     $map = Get-IPQValue $Result.Info 'Map' ''
     if ($map) {
@@ -2320,7 +3080,19 @@ function Write-IPQPrettyReport {
         Write-Host '已跳过' -ForegroundColor DarkGray
     }
     else {
-        Write-Host $(if ($Result.Mail.Port25) { '可用' } else { '阻断' }) -ForegroundColor $(if ($Result.Mail.Port25) { 'Green' } else { 'Red' })
+        $port25Status = if ($null -ne $Result.Mail.PSObject.Properties['Port25Status']) {
+            ConvertTo-IPQPort25StatusLabel $Result.Mail.Port25Status
+        }
+        else {
+            $(if ($Result.Mail.Port25) { '可用' } else { '阻断' })
+        }
+        $port25Color = switch ($port25Status) {
+            '可用' { 'Green' }
+            '占用' { 'Yellow' }
+            '代理不测' { 'DarkYellow' }
+            default { 'Red' }
+        }
+        Write-Host $port25Status -ForegroundColor $port25Color
     }
     if ($null -ne $Result.Mail) {
         $serviceProperties = @($Result.Mail.Services.PSObject.Properties)
@@ -2350,9 +3122,6 @@ function Write-IPQPrettyReport {
     }
     Write-Host ''
 
-    if (@($Result.Warnings).Count -gt 0) {
-        Write-Host "数据源警告：$(@($Result.Warnings).Count) 项（详见 JSON 报告）" -ForegroundColor DarkYellow
-    }
     Write-Host ('=' * $lineWidth) -ForegroundColor DarkGray
 }
 

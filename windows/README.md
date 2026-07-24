@@ -12,7 +12,7 @@
 - 原生/广播 IP、家宽/机房、分库风险等级与风险因子
 - TikTok、Disney+、Netflix、YouTube Premium、Amazon Prime Video、Reddit、ChatGPT
 - 流媒体与 AI 的状态、地区及原生/DNS 解锁方式
-- 接近上游的 74 列、49 行彩色六模块布局；独立窗口自动使用 14 号 Consolas，并隐藏水平、垂直滚动条；窄终端自动退回纵向文本
+- 接近上游的 74 列、47 行彩色六模块布局；独立窗口自动使用 22 号 Consolas，并隐藏水平、垂直滚动条；窄终端自动退回纵向文本
 - 12 家邮件服务的 SMTP 25 端口连通性
 - 上游列表中的 439 个唯一 DNSBL
 - 控制台、JSON、纯文本报告
@@ -35,7 +35,23 @@ sing-box 放在 `windows/tools/`，已由 `.gitignore` 排除，不进入提交�
 
 ## 最简单的使用方法
 
-双击：
+安装到长期目录并注册一条命令：
+
+```powershell
+.\Install-IPQuality.ps1
+```
+
+以后只需在任意 PowerShell 或“运行”环境输入：
+
+```powershell
+ipq
+```
+
+`ipq` 默认检测 IPv4，自动识别 v2rayN 当前节点常用的本地代理端口，
+在独立 PowerShell 窗口中显示完整结果，并将 JSON 保存到安装目录的
+`windows\reports`。不会在代理不可用时悄悄改测本机直连。
+
+也可以在源码目录双击：
 
 ```text
 Start-IPQuality.cmd
@@ -51,10 +67,10 @@ Start-NodeCheck.cmd
 
 ## PowerShell 命令
 
-检测当前 IPv4：
+直接调用底层脚本检测本机 IPv4：
 
 ```powershell
-.\IPQuality.ps1 -IPv4
+.\Start-IPQuality.ps1 -IPv4 -Direct
 ```
 
 检测双栈并显示完整 IP：
@@ -66,7 +82,7 @@ Start-NodeCheck.cmd
 使用 SOCKS5H 代理：
 
 ```powershell
-.\IPQuality.ps1 -IPv4 -Proxy 'socks5h://127.0.0.1:1080'
+.\Start-IPQuality.ps1 -IPv4 -Proxy 'socks5h://127.0.0.1:1080'
 ```
 
 检测单条 `ss://` 节点：
@@ -131,7 +147,9 @@ Start-NodeCheck.cmd
 - 流媒体页面和未公开 API 可能随时变化。连接失败标为 `Error`，HTTP 拒绝才标为 `Blocked`。
 - 使用 `-Proxy` 时，HTTP 与流媒体请求走代理。DNSBL 是针对已发现出口 IP 的本地 DNS 查询。
 - `ss://` 当前不支持 SIP003 `plugin=` 节点。
-- 本实现不会自动上传报告。报告只在明确指定 `-Output` 时写入本地。
+- 本实现不会上传报告。`ipq`/`Start-IPQuality.ps1` 默认只在本地保存 JSON；
+  使用 `-NoSave` 可不落盘。直接调用底层 `IPQuality.ps1` 时仍只有明确指定
+  `-Output` 才写文件。
 
 ## 测试
 

@@ -6,5 +6,5 @@ if not exist "%PWSH%" (
   echo Download: https://aka.ms/powershell-release?tag=stable
   exit /b 1
 )
-"%PWSH%" -NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -File "%~dp0IPQuality.ps1" %*
+start "IPQuality" "%PWSH%" -NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -File "%~dp0Start-IPQuality.ps1" %*
 endlocal

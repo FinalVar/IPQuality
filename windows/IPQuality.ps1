@@ -17,7 +17,9 @@ param(
     [ValidateRange(2, 60)]
     [int]$TimeoutSeconds = 10,
     [ValidateRange(1, 100)]
-    [int]$DnsblConcurrency = 40
+    [int]$DnsblConcurrency = 40,
+    [ValidateRange(8, 32)]
+    [int]$ConsoleFontSize = 22
 )
 
 Set-StrictMode -Version Latest
@@ -25,9 +27,13 @@ $ErrorActionPreference = 'Stop'
 
 $modulePath = Join-Path $PSScriptRoot 'IPQuality.psm1'
 Import-Module $modulePath -Force
-if ($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
+
+function Set-IPQConsoleLayout {
+    if ($Host.Name -ne 'ConsoleHost' -or [Console]::IsOutputRedirected) {
+        return
+    }
+
     try {
-        $Host.UI.RawUI.WindowTitle = if ($Lite) { 'IPQuality Lite - 正在检测' } else { 'IPQuality Full - 正在检测' }
         if (-not ('IPQuality.NativeConsole' -as [type])) {
             Add-Type -TypeDefinition @'
 using System;
@@ -62,6 +68,19 @@ namespace IPQuality {
             ref FontInfo info
         );
 
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetConsoleWindow();
+
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr window, int command);
+
+        public static void RestoreWindow() {
+            var window = GetConsoleWindow();
+            if (window != IntPtr.Zero) {
+                ShowWindow(window, 9);
+            }
+        }
+
         public static bool SetFont(short height) {
             var info = new FontInfo {
                 Size = (uint)Marshal.SizeOf<FontInfo>(),
@@ -76,11 +95,12 @@ namespace IPQuality {
 }
 '@
         }
-        [IPQuality.NativeConsole]::SetFont(14) | Out-Null
+        [IPQuality.NativeConsole]::RestoreWindow()
+        [IPQuality.NativeConsole]::SetFont([int16]$ConsoleFontSize) | Out-Null
 
         $maximum = $Host.UI.RawUI.MaxPhysicalWindowSize
         $targetWidth = [Math]::Min(74, $maximum.Width)
-        $targetHeight = [Math]::Min(49, $maximum.Height)
+        $targetHeight = [Math]::Min(47, $maximum.Height)
         $buffer = $Host.UI.RawUI.BufferSize
         $buffer.Width = [Math]::Max($buffer.Width, $targetWidth)
         $buffer.Height = [Math]::Max($buffer.Height, $targetHeight)
@@ -93,6 +113,14 @@ namespace IPQuality {
         $buffer.Width = $Host.UI.RawUI.WindowSize.Width
         $buffer.Height = $Host.UI.RawUI.WindowSize.Height
         $Host.UI.RawUI.BufferSize = $buffer
+    }
+    catch {
+    }
+}
+Set-IPQConsoleLayout
+if ($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
+    try {
+        $Host.UI.RawUI.WindowTitle = if ($Lite) { 'IPQuality Lite - 正在检测' } else { 'IPQuality Full - 正在检测' }
     }
     catch {
     }
@@ -153,10 +181,21 @@ try {
 
     if ($Output) {
         Export-IPQualityReport -Result $results -Path $Output -Force:$Force
-        Write-Host "报告已保存：$([IO.Path]::GetFullPath($Output))" -ForegroundColor Green
+        if ($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
+            try {
+                $Host.UI.RawUI.WindowTitle = if ($Lite) {
+                    'IPQuality Lite - 检测结果（已保存）'
+                }
+                else {
+                    'IPQuality Full - 检测结果（已保存）'
+                }
+            }
+            catch {
+            }
+        }
     }
+    Set-IPQConsoleLayout
 }
 catch {
-    Write-Error $_
-    exit 1
+    throw
 }

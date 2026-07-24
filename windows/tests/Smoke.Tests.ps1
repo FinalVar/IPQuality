@@ -32,6 +32,37 @@ $windowsRoot = Split-Path -Parent $PSScriptRoot
 $modulePath = Join-Path $windowsRoot 'IPQuality.psm1'
 Import-Module $modulePath -Force
 $module = Get-Module IPQuality
+$entryScript = Get-Content -Raw (Join-Path $windowsRoot 'IPQuality.ps1')
+$launcherScript = Get-Content -Raw (Join-Path $windowsRoot 'Start-IPQuality.ps1')
+
+Assert-True (
+    $entryScript -match '\[int\]\$ConsoleFontSize\s*=\s*22'
+) '底层入口的默认控制台字号应固定为 22'
+Assert-True (
+    $launcherScript -match '\[int\]\$ConsoleFontSize\s*=\s*22'
+) '日常启动器的默认控制台字号应固定为 22'
+$localDnsSocksIndex = $launcherScript.IndexOf(
+    "'socks5://127.0.0.1:7890'",
+    [StringComparison]::Ordinal
+)
+$remoteDnsSocksIndex = $launcherScript.IndexOf(
+    "'socks5h://127.0.0.1:7890'",
+    [StringComparison]::Ordinal
+)
+Assert-True (
+    $localDnsSocksIndex -ge 0 -and
+    $remoteDnsSocksIndex -ge 0 -and
+    $localDnsSocksIndex -lt $remoteDnsSocksIndex
+) 'IPv4/IPv6 预检应先使用可严格控制地址族的本地 DNS SOCKS5'
+Assert-True (
+    $entryScript -match '\$targetWidth\s*=\s*\[Math\]::Min\(74,'
+) '标准控制台宽度应固定为 74 列'
+Assert-True (
+    $entryScript -match '\$targetHeight\s*=\s*\[Math\]::Min\(47,'
+) '标准控制台高度应固定为 47 行'
+Assert-True (
+    $entryScript -notmatch 'Write-Host\s+"报告已保存'
+) '保存提示不得额外占用报告正文行'
 
 $parserErrors = 0
 foreach ($file in (Get-ChildItem -LiteralPath $windowsRoot -Recurse -Include *.ps1, *.psm1 -File)) {
@@ -81,6 +112,99 @@ Assert-Equal $parserErrors 0 '所有 PowerShell 文件应通过语法解析'
     }
     if ((Get-IPQDisplayWidth (Format-IPQFixedWidth -Text '家宽' -Width 8 -Align Center)) -ne 8) {
         throw '控制台固定宽度单元格应保持目标显示宽度'
+    }
+    if ($script:UserAgent -notmatch '(?:Chrome/(?:140|141|142|143|144|145)\.0\.0\.0|Firefox/(?:140|141|142|143|144|145|146|147)\.0)') {
+        throw 'User-Agent 应与上游当前随机版本集合一致'
+    }
+    if ((ConvertTo-IPQDms -Latitude '33.9395' -Longitude '-84.2008') -ne '84°12′3″W, 33°56′22″N') {
+        throw 'DMS 坐标格式应与上游一致'
+    }
+    if ((Get-IPQMapUrl -Latitude '33.9395' -Longitude '-84.2008' -AccuracyRadius 1001) -ne 'https://check.place/33.9395,-84.2008,12,cn') {
+        throw '地图缩放和 URL 应与上游一致'
+    }
+    $dbIpFixture = @'
+<code class="language-json">{"countryCode":"US"}</code>
+<th class='text-center'>Crawler</th><th>Proxy</th><th>Attack source</th>
+<span class="sr-only">No&nbsp;&nbsp;</span>
+<span class="sr-only">Yes&nbsp;&nbsp;</span>
+<span class="sr-only">No&nbsp;&nbsp;</span>
+Estimated threat level for this IP address is <span class='label'>Low</span>
+'@
+    $dbIpParsed = ConvertFrom-IPQDbIpPage -Body $dbIpFixture
+    if (
+        $dbIpParsed.CountryCode -ne 'US' -or
+        $dbIpParsed.Score -ne 0 -or
+        $dbIpParsed.Flags.Robot -ne $false -or
+        $dbIpParsed.Flags.Proxy -ne $true -or
+        $dbIpParsed.Flags.Abuser -ne $false
+    ) {
+        throw 'DB-IP 页面 Yes/No 与 &nbsp; 解析应与上游一致'
+    }
+    if (-not (Test-IPQExpectedEmptyDnsErrorId 'DNS_ERROR_RCODE_NAME_ERROR,Microsoft.DnsClient.Commands.ResolveDnsName')) {
+        throw 'DNSBL 的 NXDOMAIN 必须按上游空响应计为正常'
+    }
+    if (Test-IPQExpectedEmptyDnsErrorId 'DNS_ERROR_RCODE_SERVER_FAILURE,Microsoft.DnsClient.Commands.ResolveDnsName') {
+        throw 'DNSBL 的服务器故障不得伪装成正常 NXDOMAIN'
+    }
+    $proxyMail = Get-IPQMailChecks -Context ([pscustomobject]@{
+        Proxy = 'socks5h://127.0.0.1:7890'
+        RouteType = 'Proxy'
+    }) -Address '203.0.113.10'
+    if (
+        $proxyMail.Port25Status -ne 'ProxyUnsupported' -or
+        @($proxyMail.Services.PSObject.Properties | Where-Object Value -eq $true).Count -ne 0
+    ) {
+        throw '代理模式邮件结果应与上游全部不可用语义一致'
+    }
+    if ((ConvertTo-IPQUpstreamUnlockType -Checks @($true, $false, $true)) -ne 'DNS') {
+        throw '任一官方 DNS 检查失败时应标为 DNS'
+    }
+    if ((ConvertTo-IPQUpstreamUnlockType -Checks @($true, $true)) -ne '原生') {
+        throw '全部官方 DNS 检查通过时应标为原生'
+    }
+    if (Test-IPQUpstreamDnsAddress -ResolvedAddress '192.168.1.2' -DnsServer '1.1.1.1') {
+        throw '官方兼容性 DNS 检查不得把私网响应标为原生'
+    }
+    if (Test-IPQUpstreamDnsAddress -ResolvedAddress '1.1.1.9' -DnsServer '1.1.1.1') {
+        throw '官方兼容性 DNS 检查不得把 DNS 服务器同 /24 响应标为原生'
+    }
+    if (-not (Test-IPQUpstreamDnsAddress -ResolvedAddress '8.8.8.8' -DnsServer '1.1.1.1')) {
+        throw '官方兼容性 DNS 检查应接受独立公网响应'
+    }
+
+    $context = [pscustomobject]@{ AddressFamily = 4 }
+    $emptyResponse = [pscustomobject]@{ Body = ''; Error = 'curl failed'; Success = $false; ExitCode = 35 }
+    $ohNoResponse = [pscustomobject]@{ Body = '<html>Oh no!</html>'; Error = ''; Success = $true; ExitCode = 0 }
+    $availableResponse = [pscustomobject]@{ Body = '<html>"id":"US","countryName":"United States"</html>'; Error = ''; Success = $true; ExitCode = 0 }
+    if ((Resolve-IPQNetflixCompatibilityResult -Responses @($emptyResponse, $availableResponse) -Context $context).Status -ne 'Error') {
+        throw 'Netflix 任一官方片名页为空时应判为失败'
+    }
+    if ((Resolve-IPQNetflixCompatibilityResult -Responses @($ohNoResponse, $ohNoResponse) -Context $context).Status -ne 'OriginalsOnly') {
+        throw 'Netflix 两部官方片名页均受限时应判为仅自制'
+    }
+    if ((Resolve-IPQNetflixCompatibilityResult -Responses @($ohNoResponse, $availableResponse) -Context $context).Status -ne 'Available') {
+        throw 'Netflix 至少一部官方片名页可用时应判为解锁'
+    }
+
+    $allowed = [pscustomobject]@{ Body = '{}'; Error = ''; Success = $true }
+    $vpn = [pscustomobject]@{ Body = 'VPN'; Error = ''; Success = $true }
+    $unsupported = [pscustomobject]@{ Body = 'unsupported_country'; Error = ''; Success = $true }
+    $trace = [pscustomobject]@{ Body = "fl=1`nloc=US`n"; Error = ''; Success = $true }
+    $favicon403 = [pscustomobject]@{ StatusCode = 403 }
+    if ((Resolve-IPQChatGPTCompatibilityResult -Web $allowed -App $allowed -Favicon $null -Trace $trace -Context $context).Status -ne 'Available') {
+        throw 'ChatGPT Web 与 iOS 官方判据通过时应判为解锁'
+    }
+    if ((Resolve-IPQChatGPTCompatibilityResult -Web $allowed -App $vpn -Favicon $null -Trace $trace -Context $context).Status -ne 'WebOnly') {
+        throw 'ChatGPT 仅 Web 判据通过时应判为仅网页'
+    }
+    if ((Resolve-IPQChatGPTCompatibilityResult -Web $unsupported -App $allowed -Favicon $favicon403 -Trace $trace -Context $context).Status -ne 'AppOnly') {
+        throw 'ChatGPT Web 地区受限而 iOS 可用时应判为仅 APP'
+    }
+    if ((ConvertTo-IPQMediaStatusLabel 'NoPremium') -ne '禁会员') {
+        throw 'YouTube Premium 官方状态标签映射失败'
+    }
+    if ((ConvertTo-IPQMediaStatusLabel 'IDCOnly') -ne '机房') {
+        throw 'TikTok IDC 官方状态标签映射失败'
     }
 }
 
@@ -158,7 +282,7 @@ $syntheticResult = [pscustomobject][ordered]@{
     }
     Mail = $null
     DNSBlacklist = $null
-    Warnings = @()
+    Warnings = @('synthetic warning')
 }
 $reportText = Get-IPQualityReportText -Result $syntheticResult
 Assert-True ($reportText -match '203\.0\.\*\.\*') '文本报告应包含掩码地址'
@@ -170,6 +294,7 @@ $prettyOutput = (& { Format-IPQualityReport -Result $syntheticResult } 6>&1 | Ou
 Assert-True ($prettyOutput -match '二、IP类型属性') '彩色控制台报告应包含 IP 类型矩阵'
 Assert-True ($prettyOutput -match '五、流媒体及\s*AI服务解锁检测') '彩色控制台报告应包含流媒体矩阵'
 Assert-True ($prettyOutput -match 'IP2Location ipapi ipregistry IPQS SCAMALYTICS ipdata IPinfo DB-IP') '风险因子矩阵应保留完整数据库名称'
+Assert-True ($prettyOutput -notmatch '数据源警告') '数据源警告应保留在报告文件，不额外占用 47 行控制台'
 
 $offlineTemporaryRoot = Join-Path ([IO.Path]::GetTempPath()) "ipquality-test-$([Guid]::NewGuid().ToString('N'))"
 [void](New-Item -ItemType Directory -Path $offlineTemporaryRoot)
