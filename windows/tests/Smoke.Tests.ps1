@@ -579,6 +579,26 @@ try {
     Assert-True $firstInstall.Installed '隔离安装应成功'
     Assert-True (-not $firstInstall.Upgraded) '首次隔离安装不应标为升级'
     Assert-True (-not $firstInstall.PathAdded) 'NoPath 不得修改用户 PATH'
+    $firstManifest = Get-Content -Raw (
+        Join-Path $installTemporaryRoot '.ipquality-install.json'
+    ) | ConvertFrom-Json
+    Assert-Equal $firstManifest.SchemaVersion 4 '安装清单格式版本'
+    Assert-True (
+        "$($firstManifest.SourceFingerprint)" -match '^[0-9a-f]{64}$' -and
+        $firstManifest.SourceFingerprintAlgorithm -eq
+            'SHA256(path<TAB>sha256;LF;v1)' -and
+        [int]$firstManifest.SourceFileCount -gt 20
+    ) '安装清单必须始终记录确定性的来源内容指纹'
+    Assert-Equal $firstInstall.SourceFingerprint (
+        $firstManifest.SourceFingerprint
+    ) '安装结果与清单的来源指纹必须一致'
+    $expectedSourceCommit = (
+        & git -C $repositoryRoot rev-parse HEAD 2>$null |
+            Select-Object -First 1
+    )
+    Assert-Equal $firstManifest.SourceCommit (
+        "$expectedSourceCommit".Trim()
+    ) '从 Git checkout 安装时必须记录源提交'
     foreach ($relativePath in @(
         '.ipquality-install.json',
         'bin\ipq.cmd',
@@ -634,6 +654,9 @@ try {
         -Destination $installTemporaryRoot `
         -NoPath
     Assert-True $secondInstall.Upgraded '重复安装应识别为幂等升级'
+    Assert-Equal $secondInstall.SourceFingerprint (
+        $firstManifest.SourceFingerprint
+    ) '同一来源重复安装必须产生相同内容指纹'
     Assert-True (
         Test-Path -LiteralPath $fixtureReport -PathType Leaf
     ) '升级不得删除既有报告'

@@ -33,6 +33,11 @@ require administrator rights. A supported legacy installation under
 `%USERPROFILE%\Documents\Codex\Tools\IPQuality-Windows` is upgraded in place so
 that existing reports are not moved or deleted.
 
+The install manifest always records a deterministic SHA-256 fingerprint of the
+source files. A Git checkout also records its commit. GitHub ZIP archives have
+no `.git` metadata, so their `SourceCommit` may be empty while
+`SourceFingerprint` must still be present.
+
 Open a new PowerShell, Command Prompt, or Run dialog and type:
 
 ```powershell

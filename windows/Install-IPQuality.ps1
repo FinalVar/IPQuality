@@ -212,6 +212,47 @@ function ConvertTo-IPQCmdPath {
     return $fullPath
 }
 
+function Get-IPQSourceFingerprint {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string[]]$RelativePaths
+    )
+
+    [string[]]$orderedPaths = @(
+        $RelativePaths |
+            ForEach-Object { "$_".Replace('/', '\') } |
+            Select-Object -Unique
+    )
+    [Array]::Sort(
+        $orderedPaths,
+        [StringComparer]::OrdinalIgnoreCase
+    )
+    $entries = [Collections.Generic.List[string]]::new()
+    foreach ($relativePath in $orderedPaths) {
+        $sourcePath = Join-Path $Root $relativePath
+        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+            throw "来源指纹文件缺失：$sourcePath"
+        }
+        $fileHash = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData(
+                [IO.File]::ReadAllBytes($sourcePath)
+            )
+        ).ToLowerInvariant()
+        $portablePath = $relativePath.Replace('\', '/')
+        $entries.Add("$portablePath`t$fileHash")
+    }
+    $payload = [Text.Encoding]::UTF8.GetBytes(
+        ($entries -join "`n")
+    )
+    [pscustomobject][ordered]@{
+        Algorithm = 'SHA256(path<TAB>sha256;LF;v1)'
+        Value = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData($payload)
+        ).ToLowerInvariant()
+        FileCount = $entries.Count
+    }
+}
+
 $sourceWindows = [IO.Path]::GetFullPath($PSScriptRoot)
 $sourceRoot = [IO.Path]::GetFullPath((Split-Path -Parent $sourceWindows))
 
@@ -470,6 +511,27 @@ foreach ($fileName in $runtimeFiles) {
         -Force
 }
 
+$sourceFingerprintPaths = [Collections.Generic.List[string]]::new()
+foreach ($relativePath in @(
+    'Install.cmd',
+    'Install.ps1',
+    'Uninstall.cmd',
+    'Uninstall.ps1',
+    'LICENSE',
+    'ip.sh'
+)) {
+    $sourceFingerprintPaths.Add($relativePath)
+}
+foreach ($fileName in $sourceRefFiles.Name) {
+    $sourceFingerprintPaths.Add("ref\$fileName")
+}
+foreach ($fileName in $runtimeFiles) {
+    $sourceFingerprintPaths.Add("windows\$fileName")
+}
+$sourceFingerprint = Get-IPQSourceFingerprint `
+    -Root $sourceRoot `
+    -RelativePaths $sourceFingerprintPaths.ToArray()
+
 $launcherPath = ConvertTo-IPQCmdPath (
     Join-Path $destinationWindows 'Start-IPQuality.ps1'
 )
@@ -544,7 +606,7 @@ try {
 catch {
 }
 $manifest = [pscustomobject][ordered]@{
-    SchemaVersion = 3
+    SchemaVersion = 4
     Product = 'IPQuality-Windows'
     Installed = $true
     InstalledUtc = [DateTime]::UtcNow.ToString('o')
@@ -562,6 +624,9 @@ $manifest = [pscustomobject][ordered]@{
     RuntimeFiles = @($runtimeFiles)
     RefFiles = @($sourceRefFiles.Name)
     SourceCommit = $sourceCommit
+    SourceFingerprintAlgorithm = $sourceFingerprint.Algorithm
+    SourceFingerprint = $sourceFingerprint.Value
+    SourceFileCount = $sourceFingerprint.FileCount
 }
 [IO.File]::WriteAllText(
     $manifestPath,
@@ -584,4 +649,6 @@ $shimOnUserPath = Test-IPQUserPathEntry -Path $shimRoot
     ShimOnUserPath = $shimOnUserPath
     Reports = $reportsDirectory
     RestartTerminalRecommended = $pathAdded
+    SourceCommit = $sourceCommit
+    SourceFingerprint = $sourceFingerprint.Value
 }

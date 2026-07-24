@@ -42,6 +42,10 @@ Install.cmd
 `%USERPROFILE%\Documents\Codex\Tools\IPQuality-Windows`，安装器会原地升级，
 不会擅自迁移或删除历史报告。安装器按当前用户运行，不需要管理员权限。
 
+安装清单始终记录所用源文件的确定性 SHA-256 指纹；从 Git checkout 安装时还会记录
+提交号。GitHub ZIP 本身没有 `.git` 元数据，因此其 `SourceCommit` 可以为空，但
+`SourceFingerprint` 仍必须存在。
+
 安装完成后，在 PowerShell、CMD 或“运行”窗口输入：
 
 ```powershell

@@ -121,7 +121,9 @@ IPv4 与 IPv6 在可见窗口中必须分别运行。双栈只用于 JSON、文�
   引导，不能仅用 PowerShell 7 语法解析代替。
 - 用户 `PATH` 修改必须幂等；安装器只移除自己曾管理的路径。
 - 升级必须保留 `windows/reports`，不得覆盖非 IPQuality 的非空目录。
-- 安装清单必须记录目标、命令入口、受管文件和源提交。
+- 安装清单必须记录目标、命令入口、受管文件，以及安装输入文件的确定性 SHA-256
+  指纹。从 Git checkout 安装时还必须记录源提交；GitHub ZIP 没有 `.git`，允许
+  `SourceCommit` 为空，但不得缺少 `SourceFingerprint`。
 - 默认卸载只删除清单列出的运行文件，并保留报告和用户自建文件。
 - 只有显式 `-PurgeReports` 才能递归删除安装根目录；删除前必须拒绝磁盘根、用户目录、
   Documents、Desktop、Windows、Program Files 等宽目标。
@@ -190,7 +192,8 @@ Windows 版本采用 `0.x.y`：
 - 离线测试、语法解析和补丁格式全部通过；
 - 在线错误保留而非被吞掉；
 - Windows README、维护规范和参数行为一致；
-- 安装副本的 `SourceCommit` 指向最终提交；
+- Git checkout 安装副本的 `SourceCommit` 指向最终提交，所有安装来源都有
+  `SourceFingerprint`；
 - 远端 `windows-native` 与本地提交相同；
 - 公开 ZIP 包含安装器、基线文件和最新版 Windows 模块；
 - 默认分支仍为 `windows-native`。
