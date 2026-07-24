@@ -1,10 +1,11 @@
 #Requires -Version 7.2
 Set-StrictMode -Version Latest
 
-$script:IPQualityVersion = '0.6.1'
+$script:IPQualityVersion = '0.7.0'
 $script:UpstreamVersion = 'unknown'
 $script:RepositoryUrl = 'https://github.com/FinalVar/IPQuality'
 $script:UpstreamRepositoryUrl = 'https://github.com/xykt/IPQuality'
+$script:CompatibilityReviewed = $false
 
 function New-IPQUpstreamUserAgent {
     [CmdletBinding()]
@@ -64,6 +65,40 @@ try {
     }
 }
 catch {
+}
+
+$compatibilityBaselinePath = Join-Path $PSScriptRoot 'compatibility-baseline.json'
+try {
+    $reviewedBaseline = Get-Content `
+        -Raw `
+        -LiteralPath $compatibilityBaselinePath `
+        -ErrorAction Stop |
+        ConvertFrom-Json -ErrorAction Stop
+    $dnsblPath = [IO.Path]::GetFullPath(
+        (Join-Path $PSScriptRoot '..\ref\dnsbl.list')
+    )
+    $dnsblUniqueZones = @(
+        Get-Content -LiteralPath $dnsblPath -ErrorAction Stop |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -and -not $_.StartsWith('#') } |
+            Sort-Object -Unique
+    ).Count
+    $script:CompatibilityReviewed = (
+        $reviewedBaseline.SchemaVersion -eq 1 -and
+        "$($reviewedBaseline.Repository)" -eq
+            $script:UpstreamRepositoryUrl -and
+        "$($reviewedBaseline.ScriptVersion)" -eq
+            $script:UpstreamVersion -and
+        "$($reviewedBaseline.ScriptSha256)" -eq
+            $script:UpstreamScriptSha256 -and
+        "$($reviewedBaseline.WindowsVersion)" -eq
+            $script:IPQualityVersion -and
+        [int]$reviewedBaseline.DnsblUniqueZones -eq
+            $dnsblUniqueZones
+    )
+}
+catch {
+    $script:CompatibilityReviewed = $false
 }
 
 function Get-IPQValue {
@@ -171,6 +206,35 @@ function ConvertFrom-IPQJson {
     }
     catch {
         return $null
+    }
+}
+
+function Get-IPQReportTimes {
+    [CmdletBinding()]
+    param(
+        [DateTimeOffset]$Time = [DateTimeOffset]::UtcNow
+    )
+
+    $utc = $Time.UtcDateTime
+    $zoneId = if ($IsWindows) {
+        'China Standard Time'
+    }
+    else {
+        'Asia/Shanghai'
+    }
+    $chinaTime = [TimeZoneInfo]::ConvertTimeFromUtc(
+        $utc,
+        [TimeZoneInfo]::FindSystemTimeZoneById($zoneId)
+    )
+    [pscustomobject][ordered]@{
+        Utc = $utc.ToString(
+            "yyyy-MM-dd HH:mm:ss 'UTC'",
+            [Globalization.CultureInfo]::InvariantCulture
+        )
+        China = $chinaTime.ToString(
+            "yyyy-MM-dd HH:mm:ss 'CST'",
+            [Globalization.CultureInfo]::InvariantCulture
+        )
     }
 }
 
@@ -2440,6 +2504,11 @@ function Invoke-IPQualityCheck {
         ) {
             $warnings.Add("DNSBL：$($dnsbl.Errors) 项查询异常；按官方 dig 空响应语义计入正常，并在 JSON 中保留错误")
         }
+        if (-not $script:CompatibilityReviewed) {
+            $warnings.Add(
+                '兼容性基线：当前 Windows 代码、上游脚本或 DNSBL 列表尚未通过同一份审核清单'
+            )
+        }
 
         $latitude = Get-IPQValue $maxMind 'Latitude'
         $longitude = Get-IPQValue $maxMind 'Longitude'
@@ -2484,6 +2553,7 @@ function Invoke-IPQualityCheck {
                 '未知'
             }
         }
+        $reportTimes = Get-IPQReportTimes
 
         $allResults.Add([pscustomobject][ordered]@{
             Head = [pscustomobject][ordered]@{
@@ -2492,8 +2562,8 @@ function Invoke-IPQualityCheck {
                 UpstreamVersion = $script:UpstreamVersion
                 Repository = $script:RepositoryUrl
                 Upstream = $script:UpstreamRepositoryUrl
-                TimeUtc = [DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss UTC')
-                TimeLocal = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') CST"
+                TimeUtc = $reportTimes.Utc
+                TimeLocal = $reportTimes.China
                 Address = $displayAddress
                 AddressFamily = "IPv$family"
                 RouteType = $context.RouteType
@@ -2506,6 +2576,7 @@ function Invoke-IPQualityCheck {
                 else {
                     'xykt/IPQuality ip.sh (hash unavailable)'
                 })
+                CompatibilityReviewed = $script:CompatibilityReviewed
                 ProxyPolicy = 'ExplicitOnly'
             }
             Info = $info

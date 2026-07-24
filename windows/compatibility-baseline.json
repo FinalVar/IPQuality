@@ -1,0 +1,10 @@
+{
+  "SchemaVersion": 1,
+  "Repository": "https://github.com/xykt/IPQuality",
+  "Branch": "main",
+  "ScriptVersion": "v2026-03-29",
+  "ScriptSha256": "69e7a8d0b9018a508fa7a54a3f7e98c9fa8c19eeb6995d60675070361cb76c03",
+  "WindowsVersion": "0.7.0",
+  "DnsblUniqueZones": 439,
+  "ReviewedDate": "2026-07-24"
+}

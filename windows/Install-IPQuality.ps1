@@ -453,9 +453,12 @@ $runtimeFiles = @(
     'Start-NodeCheck.cmd',
     'Install-SingBox.ps1',
     'Compare-IPQuality.ps1',
+    'compatibility-baseline.json',
     'Install-IPQuality.ps1',
     'Uninstall-IPQuality.ps1',
-    'README.md'
+    'README.md',
+    'README_EN.md',
+    'MAINTENANCE.md'
 )
 foreach ($fileName in $runtimeFiles) {
     $sourcePath = Join-Path $sourceWindows $fileName

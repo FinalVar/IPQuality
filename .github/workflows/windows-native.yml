@@ -1,0 +1,57 @@
+name: Windows native tests
+
+on:
+  push:
+    branches:
+      - windows-native
+    paths:
+      - ".github/workflows/windows-native.yml"
+      - "Install.cmd"
+      - "Install.ps1"
+      - "Uninstall.cmd"
+      - "Uninstall.ps1"
+      - "ip.sh"
+      - "ref/**"
+      - "windows/**"
+      - "README.md"
+      - "README_EN.md"
+  pull_request:
+    branches:
+      - windows-native
+    paths:
+      - ".github/workflows/windows-native.yml"
+      - "Install.cmd"
+      - "Install.ps1"
+      - "Uninstall.cmd"
+      - "Uninstall.ps1"
+      - "ip.sh"
+      - "ref/**"
+      - "windows/**"
+      - "README.md"
+      - "README_EN.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-native-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: PowerShell 7 smoke tests
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Show PowerShell version
+        shell: pwsh
+        run: $PSVersionTable | Format-List
+
+      - name: Run offline regression suite
+        shell: pwsh
+        run: ./windows/tests/Smoke.Tests.ps1

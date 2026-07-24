@@ -4,30 +4,18 @@
 <a href="/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-blue.svg" alt="license" /></a>  
 </p>
 
-## IP Quality Check Script  -  [IP质量体检脚本 (中文)](https://github.com/xykt/IPQuality/blob/main/README.md)
+## IP Quality Check Script  -  [IP质量体检脚本 (中文)](README.md)
 
-### Native Windows edition
-
-This fork adds a PowerShell 7 implementation under `windows/` that does not require Docker or WSL.
-
-- Download and extract the
-  [`windows-native` branch ZIP](https://github.com/FinalVar/IPQuality/archive/refs/heads/windows-native.zip),
-  then double-click `Install.cmd`.
-- The installer copies the runtime to a per-user location and adds the `ipq`
-  launcher to the user `PATH`. Afterwards, type `ipq` in PowerShell, Command
-  Prompt, or the Windows Run dialog to test the active node.
-- Running `Install.cmd` again performs an in-place upgrade without deleting
-  existing reports.
-- `Uninstall.cmd` in either the extracted source or installation directory
-  removes the runtime while preserving reports and the small purge entry points
-  by default; pass `-PurgeReports` only when those reports should also be deleted.
-- Double-click `windows/Start-NodeCheck.cmd` to securely enter and test one `ss://` node.
-- Includes IPv4/IPv6, HTTP/SOCKS proxy routing, nine reputation sources, residential/datacenter and geo-consistency judgments, media/AI unlock type checks, SMTP, 439 unique DNSBL zones, and JSON/text reports.
-- When the display permits it, the result window automatically chooses the
-  largest Consolas font up to 18 that can display the complete report without
-  horizontal or vertical scrollbars.
-
-See the [Windows README](windows/README.md) for details.
+<!-- windows-native:start -->
+> [!IMPORTANT]
+> The `windows-native` branch adds a native PowerShell 7 edition that requires
+> neither Docker nor WSL. Download the
+> [Windows ZIP](https://github.com/FinalVar/IPQuality/archive/refs/heads/windows-native.zip),
+> double-click `Install.cmd`, then use the `ipq` command. See the
+> [Windows README](windows/README_EN.md) for behavior, privacy limits, and the
+> 18-point 74×47 no-scroll display contract. Maintainer and upstream-sync rules
+> are in [Windows maintenance](windows/MAINTENANCE.md) (Chinese).
+<!-- windows-native:end -->
 
 **Supported OS/Platform: Ubuntu | Debian | Linux Mint | Fedora | Red Hat Enterprise Linux (RHEL) | CentOS | Arch Linux | Manjaro | Alpine Linux | AlmaLinux | Rocky Linux | macOS | Anolis OS | Alibaba Cloud Linux | SUSE Linux | openSUSE | Void Linux | Windows (PowerShell 7 or Docker)**
 

@@ -31,13 +31,30 @@ function Assert-True {
 $windowsRoot = Split-Path -Parent $PSScriptRoot
 $repositoryRoot = Split-Path -Parent $windowsRoot
 $modulePath = Join-Path $windowsRoot 'IPQuality.psm1'
+$baselinePath = Join-Path $windowsRoot 'compatibility-baseline.json'
 Import-Module $modulePath -Force
 $module = Get-Module IPQuality
 $moduleScript = Get-Content -Raw $modulePath
+$baseline = Get-Content -Raw $baselinePath | ConvertFrom-Json
 $entryScript = Get-Content -Raw (Join-Path $windowsRoot 'IPQuality.ps1')
 $launcherScript = Get-Content -Raw (Join-Path $windowsRoot 'Start-IPQuality.ps1')
+$promptNodeScript = Get-Content -Raw (Join-Path $windowsRoot 'Prompt-Node.ps1')
+$singBoxInstallerScript = Get-Content -Raw (
+    Join-Path $windowsRoot 'Install-SingBox.ps1'
+)
 $installerScript = Get-Content -Raw (
     Join-Path $windowsRoot 'Install-IPQuality.ps1'
+)
+$windowsReadme = Get-Content -Raw (Join-Path $windowsRoot 'README.md')
+$windowsReadmeEnglish = Get-Content -Raw (
+    Join-Path $windowsRoot 'README_EN.md'
+)
+$maintenanceReadme = Get-Content -Raw (
+    Join-Path $windowsRoot 'MAINTENANCE.md'
+)
+$rootReadme = Get-Content -Raw (Join-Path $repositoryRoot 'README.md')
+$rootReadmeEnglish = Get-Content -Raw (
+    Join-Path $repositoryRoot 'README_EN.md'
 )
 
 Assert-True (
@@ -81,6 +98,59 @@ Assert-True (
     $installerScript -match 'Send-IPQEnvironmentChanged'
 ) '公共安装器应幂等配置用户 PATH 并广播环境变化'
 Assert-True (
+    $promptNodeScript -match (
+        "Test-Node\.ps1'\)\s+-Node\s+\`$node\s+-IPv4"
+    )
+) '隐藏输入的一键节点检测默认应只运行 IPv4 单屏报告'
+Assert-True (
+    $singBoxInstallerScript -match (
+        "\`$version\s*=\s*'(?<version>[^']+)'"
+    ) -and
+    $singBoxInstallerScript -match (
+        "\`$packageSha256\s*=\s*'(?<hash>[0-9a-f]{64})'"
+    )
+) 'sing-box 安装器必须固定版本与 SHA-256'
+$singBoxVersion = (
+    [regex]::Match(
+        $singBoxInstallerScript,
+        "\`$version\s*=\s*'(?<value>[^']+)'"
+    )
+).Groups['value'].Value
+$singBoxHash = (
+    [regex]::Match(
+        $singBoxInstallerScript,
+        "\`$packageSha256\s*=\s*'(?<value>[0-9a-f]{64})'"
+    )
+).Groups['value'].Value
+Assert-True (
+    $windowsReadme -match [regex]::Escape($singBoxVersion) -and
+    $windowsReadme -match [regex]::Escape($singBoxHash) -and
+    $windowsReadmeEnglish -match [regex]::Escape($singBoxVersion) -and
+    $windowsReadmeEnglish -match [regex]::Escape($singBoxHash) -and
+    $maintenanceReadme -match [regex]::Escape($singBoxVersion) -and
+    $maintenanceReadme -match [regex]::Escape($singBoxHash)
+) '用户文档与维护规范必须同步 sing-box 固定版本和哈希'
+Assert-True (
+    Test-Path -LiteralPath (
+        Join-Path $repositoryRoot '.github\workflows\windows-native.yml'
+    ) -PathType Leaf
+) 'Windows 原生版必须有独立 CI 工作流'
+Assert-True (
+    Test-Path -LiteralPath (
+        Join-Path $windowsRoot 'MAINTENANCE.md'
+    ) -PathType Leaf
+) 'Windows 原生版必须保留维护规范'
+Assert-True (
+    $windowsReadme -match '\[维护与兼容性规范\]\(MAINTENANCE\.md\)' -and
+    $windowsReadmeEnglish -match (
+        '\[Windows maintenance\]\(MAINTENANCE\.md\)'
+    ) -and
+    $rootReadme -match '<!-- windows-native:start -->' -and
+    $rootReadme -match '\(windows/README\.md\)' -and
+    $rootReadmeEnglish -match '<!-- windows-native:start -->' -and
+    $rootReadmeEnglish -match '\(windows/README_EN\.md\)'
+) '主 README 与 Windows README 必须保留低冲突文档入口'
+Assert-True (
     $moduleScript -match (
         '\$script:RepositoryUrl\s*=\s*' +
         "'https://github\.com/FinalVar/IPQuality'"
@@ -94,6 +164,25 @@ Assert-True (
     $moduleScript -match 'Repository\s*=\s*\$script:RepositoryUrl' -and
     $moduleScript -match 'Upstream\s*=\s*\$script:UpstreamRepositoryUrl'
 ) 'JSON Head 必须分别记录本仓库与上游仓库'
+Assert-Equal $baseline.SchemaVersion 1 '兼容性基线格式版本'
+Assert-Equal $baseline.Repository 'https://github.com/xykt/IPQuality' (
+    '兼容性基线必须指向明确的上游仓库'
+)
+$actualUpstreamHash = (
+    Get-FileHash (Join-Path $repositoryRoot 'ip.sh') -Algorithm SHA256
+).Hash.ToLowerInvariant()
+Assert-Equal $baseline.ScriptSha256 $actualUpstreamHash (
+    '兼容性基线必须锁定当前 ip.sh 内容'
+)
+$actualDnsblUniqueZones = @(
+    Get-Content (Join-Path $repositoryRoot 'ref\dnsbl.list') |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ -and -not $_.StartsWith('#') } |
+        Sort-Object -Unique
+).Count
+Assert-Equal $baseline.DnsblUniqueZones $actualDnsblUniqueZones (
+    '兼容性基线必须锁定当前唯一 DNSBL 数量'
+)
 $prettyReportIndex = $moduleScript.IndexOf(
     'function Write-IPQPrettyReport',
     [StringComparison]::Ordinal
@@ -131,6 +220,18 @@ foreach ($file in (
 Assert-Equal $parserErrors 0 '所有 PowerShell 文件应通过语法解析'
 
 & $module {
+    if (-not $script:CompatibilityReviewed) {
+        throw '当前代码、上游脚本与 DNSBL 列表必须匹配已审核兼容性基线'
+    }
+    $times = Get-IPQReportTimes -Time (
+        [DateTimeOffset]::Parse('2026-01-01T00:00:00Z')
+    )
+    if (
+        $times.Utc -ne '2026-01-01 00:00:00 UTC' -or
+        $times.China -ne '2026-01-01 08:00:00 CST'
+    ) {
+        throw '报告时间必须固定转换为上游使用的 Asia/Shanghai CST'
+    }
     $sample = [pscustomobject]@{
         nested = [pscustomobject]@{
             values = @([pscustomobject]@{ id = 7 })
@@ -322,6 +423,21 @@ $syntheticResult = [pscustomobject][ordered]@{
             Error = ''
         }
     )
+    TypeAssessment = [pscustomobject]@{
+        Sources = @(
+            [pscustomobject]@{
+                Name = 'IPinfo'
+                Available = $true
+                UsageType = 'isp'
+                UsageLabel = '家宽'
+                CompanyType = 'isp'
+                CompanyLabel = '家宽'
+            }
+        )
+        Verdict = '家宽'
+        HomeSignals = 1
+        DatacenterSignals = 0
+    }
     Consensus = & $module {
         $source = New-IPQSourceResult -Name IPinfo -Available $true -Flags (New-IPQFlags -Proxy $false -Tor $false -Vpn $false -Server $false)
         Get-IPQConsensus -Sources @($source)
@@ -377,6 +493,62 @@ try {
     Assert-True ((Get-Content -LiteralPath $textPath -Raw) -notmatch [char]27) '文本报告不得包含 ANSI 控制字符'
     $json = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
     Assert-Equal $json.Head.AddressFamily 'IPv4' 'JSON 报告结构'
+
+    $originalPath = Join-Path $offlineTemporaryRoot 'original.json'
+    $comparisonPath = Join-Path $offlineTemporaryRoot 'comparison.json'
+    $originalFixture = [pscustomobject][ordered]@{
+        Head = [pscustomobject]@{ IP = '203.0.*.*' }
+        Info = [pscustomobject]@{
+            ASN = 64500
+            Organization = 'Example'
+            City = [pscustomobject]@{
+                Name = 'Test City'
+                PostalCode = $null
+                Subdivisions = 'Test State'
+            }
+            Region = [pscustomobject]@{ Code = $null }
+            RegisteredRegion = [pscustomobject]@{ Code = $null }
+            Continent = [pscustomobject]@{ Code = $null }
+            TimeZone = 'Etc/UTC'
+            Type = $null
+        }
+        Type = [pscustomobject]@{
+            Usage = [pscustomobject]@{ IPinfo = '家宽' }
+            Company = [pscustomobject]@{ IPinfo = '家宽' }
+        }
+        Score = [pscustomobject]@{}
+        Factor = [pscustomobject]@{}
+        Media = [pscustomobject]@{
+            ChatGPT = [pscustomobject]@{
+                Status = '解锁'
+                Region = 'US'
+                Type = '原生'
+            }
+        }
+        Mail = [pscustomobject]@{
+            Port25 = $null
+            DNSBlacklist = [pscustomobject]@{}
+        }
+    }
+    [IO.File]::WriteAllText(
+        $originalPath,
+        ($originalFixture | ConvertTo-Json -Depth 8),
+        [Text.UTF8Encoding]::new($false)
+    )
+    $comparison = & (Join-Path $windowsRoot 'Compare-IPQuality.ps1') `
+        -OriginalPath $originalPath `
+        -WindowsPath $jsonPath `
+        -Output $comparisonPath `
+        -Quiet
+    Assert-True $comparison.Summary.SameEgress (
+        '原版与 Windows 对比器应识别相同出口'
+    )
+    Assert-True (
+        @($comparison.Details | Where-Object Class -eq 'Core').Count -gt 0
+    ) '原版与 Windows 对比器应生成核心字段明细'
+    Assert-True (
+        Test-Path -LiteralPath $comparisonPath -PathType Leaf
+    ) '原版与 Windows 对比器应支持保存审计结果'
 }
 finally {
     if (Test-Path -LiteralPath $offlineTemporaryRoot) {
@@ -402,6 +574,9 @@ try {
         'Uninstall.ps1',
         'ref\dnsbl.list',
         'windows\Start-IPQuality.ps1',
+        'windows\compatibility-baseline.json',
+        'windows\README_EN.md',
+        'windows\MAINTENANCE.md',
         'windows\Uninstall-IPQuality.ps1'
     )) {
         Assert-True (

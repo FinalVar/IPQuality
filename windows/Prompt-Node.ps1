@@ -9,7 +9,7 @@ if (-not $node) {
 }
 
 try {
-    & (Join-Path $PSScriptRoot 'Test-Node.ps1') -Node $node
+    & (Join-Path $PSScriptRoot 'Test-Node.ps1') -Node $node -IPv4
 }
 finally {
     $node = $null
