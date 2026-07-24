@@ -57,6 +57,18 @@ $rootReadmeEnglish = Get-Content -Raw (
     Join-Path $repositoryRoot 'README_EN.md'
 )
 
+foreach ($bootstrapName in @('Install.ps1', 'Uninstall.ps1')) {
+    $bootstrapBytes = [IO.File]::ReadAllBytes(
+        (Join-Path $repositoryRoot $bootstrapName)
+    )
+    Assert-True (
+        $bootstrapBytes.Length -ge 3 -and
+        $bootstrapBytes[0] -eq 0xEF -and
+        $bootstrapBytes[1] -eq 0xBB -and
+        $bootstrapBytes[2] -eq 0xBF
+    ) "$bootstrapName 必须保留 UTF-8 BOM，供 Windows PowerShell 5.1 正确解析中文"
+}
+
 Assert-True (
     $entryScript -match '\[int\]\$ConsoleFontSize\s*=\s*18'
 ) '底层入口的默认控制台字号应固定为 18'

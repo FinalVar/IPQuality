@@ -116,6 +116,9 @@ IPv4 与 IPv6 在可见窗口中必须分别运行。双栈只用于 JSON、文�
 
 - 全新安装默认使用 `%LOCALAPPDATA%\Programs\IPQuality`，已有受支持的旧安装原地升级。
 - 默认按用户安装，不要求管理员权限。
+- 根 `Install.ps1` 与 `Uninstall.ps1` 由 Windows PowerShell 5.1 首先解析，必须保存为
+  UTF-8 BOM；其余 PowerShell 7 文件可使用仓库标准编码。CI 必须检查 BOM 和真实 5.1
+  引导，不能仅用 PowerShell 7 语法解析代替。
 - 用户 `PATH` 修改必须幂等；安装器只移除自己曾管理的路径。
 - 升级必须保留 `windows/reports`，不得覆盖非 IPQuality 的非空目录。
 - 安装清单必须记录目标、命令入口、受管文件和源提交。
