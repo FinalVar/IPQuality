@@ -79,13 +79,19 @@ function Test-IPQProxyCandidate {
     }
 
     $curl = (Get-Command curl.exe -ErrorAction Stop).Source
+    $addressEndpoint = if ($AddressFamily -eq 4) {
+        'https://api.ipify.org'
+    }
+    else {
+        'https://api6.ipify.org'
+    }
     $arguments = @(
         '--silent',
         '--show-error',
         '--max-time', '6',
         '--proxy', $Value,
         $(if ($AddressFamily -eq 4) { '--ipv4' } else { '--ipv6' }),
-        'https://api64.ipify.org'
+        $addressEndpoint
     )
     $address = (& $curl @arguments 2>$null | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) {
@@ -115,19 +121,19 @@ function Find-IPQCurrentProxy {
 
     $candidates = [Collections.Generic.List[string]]::new()
     foreach ($candidate in @(
-        # Local DNS resolution makes curl's -4/-6 selection deterministic.
-        # socks5h may let the proxy resolve an IPv4 probe hostname to IPv6.
-        'socks5://127.0.0.1:7890',
+        # Prefer proxy-side DNS for the same routing semantics as the upstream
+        # -x mode. Family-specific probe hosts keep IPv4/IPv6 deterministic.
         'socks5h://127.0.0.1:7890',
+        'socks5://127.0.0.1:7890',
         [Environment]::GetEnvironmentVariable('ALL_PROXY'),
         [Environment]::GetEnvironmentVariable('HTTPS_PROXY'),
         [Environment]::GetEnvironmentVariable('HTTP_PROXY'),
         'http://127.0.0.1:7890',
-        'socks5://127.0.0.1:10808',
         'socks5h://127.0.0.1:10808',
+        'socks5://127.0.0.1:10808',
         'http://127.0.0.1:10809',
-        'socks5://127.0.0.1:1080',
-        'socks5h://127.0.0.1:1080'
+        'socks5h://127.0.0.1:1080',
+        'socks5://127.0.0.1:1080'
     )) {
         if (-not [string]::IsNullOrWhiteSpace($candidate)) {
             $candidates.Add($candidate.Trim())

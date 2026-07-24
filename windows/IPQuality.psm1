@@ -384,8 +384,15 @@ function Get-IPQPublicAddress {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$Context)
 
+    $familySpecificEndpoint = if ($Context.AddressFamily -eq 4) {
+        'https://api.ipify.org'
+    }
+    else {
+        'https://api6.ipify.org'
+    }
     $endpoints = @(
         'https://myip.check.place',
+        $familySpecificEndpoint,
         'https://api64.ipify.org',
         'https://ip.sb',
         'https://icanhazip.com',

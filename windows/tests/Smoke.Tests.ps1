@@ -41,19 +41,23 @@ Assert-True (
 Assert-True (
     $launcherScript -match '\[int\]\$ConsoleFontSize\s*=\s*22'
 ) '日常启动器的默认控制台字号应固定为 22'
-$localDnsSocksIndex = $launcherScript.IndexOf(
-    "'socks5://127.0.0.1:7890'",
-    [StringComparison]::Ordinal
-)
 $remoteDnsSocksIndex = $launcherScript.IndexOf(
     "'socks5h://127.0.0.1:7890'",
     [StringComparison]::Ordinal
 )
+$localDnsSocksIndex = $launcherScript.IndexOf(
+    "'socks5://127.0.0.1:7890'",
+    [StringComparison]::Ordinal
+)
 Assert-True (
-    $localDnsSocksIndex -ge 0 -and
     $remoteDnsSocksIndex -ge 0 -and
-    $localDnsSocksIndex -lt $remoteDnsSocksIndex
-) 'IPv4/IPv6 预检应先使用可严格控制地址族的本地 DNS SOCKS5'
+    $localDnsSocksIndex -ge 0 -and
+    $remoteDnsSocksIndex -lt $localDnsSocksIndex
+) '当前节点应优先使用与上游一致的远端 DNS SOCKS5H'
+Assert-True (
+    $launcherScript -match 'https://api\.ipify\.org' -and
+    $launcherScript -match 'https://api6\.ipify\.org'
+) 'SOCKS5H 预检应使用地址族专用出口端点'
 Assert-True (
     $entryScript -match '\$targetWidth\s*=\s*\[Math\]::Min\(74,'
 ) '标准控制台宽度应固定为 74 列'
