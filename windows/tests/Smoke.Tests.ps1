@@ -33,6 +33,7 @@ $repositoryRoot = Split-Path -Parent $windowsRoot
 $modulePath = Join-Path $windowsRoot 'IPQuality.psm1'
 Import-Module $modulePath -Force
 $module = Get-Module IPQuality
+$moduleScript = Get-Content -Raw $modulePath
 $entryScript = Get-Content -Raw (Join-Path $windowsRoot 'IPQuality.ps1')
 $launcherScript = Get-Content -Raw (Join-Path $windowsRoot 'Start-IPQuality.ps1')
 $installerScript = Get-Content -Raw (
@@ -79,6 +80,38 @@ Assert-True (
     $installerScript -match "SetEnvironmentVariable\(\s*'Path'" -and
     $installerScript -match 'Send-IPQEnvironmentChanged'
 ) '公共安装器应幂等配置用户 PATH 并广播环境变化'
+Assert-True (
+    $moduleScript -match (
+        '\$script:RepositoryUrl\s*=\s*' +
+        "'https://github\.com/FinalVar/IPQuality'"
+    ) -and
+    $moduleScript -match (
+        '\$script:UpstreamRepositoryUrl\s*=\s*' +
+        "'https://github\.com/xykt/IPQuality'"
+    )
+) '本仓库与上游仓库 URL 必须使用不同常量明确区分'
+Assert-True (
+    $moduleScript -match 'Repository\s*=\s*\$script:RepositoryUrl' -and
+    $moduleScript -match 'Upstream\s*=\s*\$script:UpstreamRepositoryUrl'
+) 'JSON Head 必须分别记录本仓库与上游仓库'
+$prettyReportIndex = $moduleScript.IndexOf(
+    'function Write-IPQPrettyReport',
+    [StringComparison]::Ordinal
+)
+Assert-True (
+    $prettyReportIndex -ge 0
+) '模块必须包含彩色控制台报告渲染器'
+$prettyReportScript = $moduleScript.Substring($prettyReportIndex)
+Assert-True (
+    $prettyReportScript -match (
+        'Format-IPQFixedWidth\s+-Text\s+\$script:RepositoryUrl'
+    )
+) '控制台报告抬头必须显示 FinalVar 本仓库'
+Assert-True (
+    $prettyReportScript -notmatch (
+        "Format-IPQFixedWidth\s+-Text\s+'ipq'"
+    )
+) '控制台报告抬头不得显示孤立的 ipq 命令行'
 
 $parserErrors = 0
 foreach ($file in (
@@ -310,11 +343,23 @@ $syntheticResult = [pscustomobject][ordered]@{
 }
 $reportText = Get-IPQualityReportText -Result $syntheticResult
 Assert-True ($reportText -match '203\.0\.\*\.\*') '文本报告应包含掩码地址'
+Assert-True (
+    $reportText -match 'https://github\.com/FinalVar/IPQuality'
+) '文本报告抬头必须显示 FinalVar 本仓库'
 Assert-True ($reportText -match '二、IP类型属性') '报告应包含原版 IP 类型模块'
 Assert-True ($reportText -match '结论：家宽') '报告应显示家宽综合判断'
 Assert-True ($reportText -match '五、流媒体及 AI 服务解锁检测') '报告应包含流媒体与 AI 模块'
 Assert-True ($reportText -match 'ChatGPT.+解锁.+US.+原生') 'ChatGPT 应显示状态、地区和解锁方式'
 $prettyOutput = (& { Format-IPQualityReport -Result $syntheticResult } 6>&1 | Out-String)
+Assert-True (
+    $prettyOutput -match 'https://github\.com/FinalVar/IPQuality'
+) '彩色控制台抬头必须显示 FinalVar 本仓库'
+Assert-True (
+    $prettyOutput -notmatch 'https://github\.com/xykt/IPQuality'
+) '彩色控制台抬头不得把上游仓库显示为本仓库'
+Assert-True (
+    $prettyOutput -notmatch '(?m)^\s*ipq\s*$'
+) '彩色控制台抬头不得包含孤立的 ipq 行'
 Assert-True ($prettyOutput -match '二、IP类型属性') '彩色控制台报告应包含 IP 类型矩阵'
 Assert-True ($prettyOutput -match '五、流媒体及\s*AI服务解锁检测') '彩色控制台报告应包含流媒体矩阵'
 Assert-True ($prettyOutput -match 'IP2Location ipapi ipregistry IPQS SCAMALYTICS ipdata IPinfo DB-IP') '风险因子矩阵应保留完整数据库名称'

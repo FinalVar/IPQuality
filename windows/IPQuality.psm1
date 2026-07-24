@@ -1,8 +1,10 @@
 #Requires -Version 7.2
 Set-StrictMode -Version Latest
 
-$script:IPQualityVersion = '0.6.0'
+$script:IPQualityVersion = '0.6.1'
 $script:UpstreamVersion = 'unknown'
+$script:RepositoryUrl = 'https://github.com/FinalVar/IPQuality'
+$script:UpstreamRepositoryUrl = 'https://github.com/xykt/IPQuality'
 
 function New-IPQUpstreamUserAgent {
     [CmdletBinding()]
@@ -2488,7 +2490,8 @@ function Invoke-IPQualityCheck {
                 Tool = 'IPQuality for Windows'
                 Version = $script:IPQualityVersion
                 UpstreamVersion = $script:UpstreamVersion
-                Upstream = 'https://github.com/xykt/IPQuality'
+                Repository = $script:RepositoryUrl
+                Upstream = $script:UpstreamRepositoryUrl
                 TimeUtc = [DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss UTC')
                 TimeLocal = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') CST"
                 Address = $displayAddress
@@ -2571,7 +2574,7 @@ function Get-IPQualityReportText {
     $builder = [Text.StringBuilder]::new()
     [void]$builder.AppendLine('########################################################################')
     [void]$builder.AppendLine("                    IP质量体检报告：$($Result.Head.Address)")
-    [void]$builder.AppendLine('                 https://github.com/FinalVar/IPQuality')
+    [void]$builder.AppendLine("                 $script:RepositoryUrl")
     [void]$builder.AppendLine("检测时间：$($Result.Head.TimeUtc)  Windows版：$($Result.Head.Version)")
     [void]$builder.AppendLine("地址族：$($Result.Head.AddressFamily)  网络路径：$($Result.Head.RouteType)")
     [void]$builder.AppendLine('########################################################################')
@@ -2962,8 +2965,7 @@ function Write-IPQPrettyReport {
     $separator = '#' * $lineWidth
     Write-Host $separator -ForegroundColor DarkGray
     Write-Host (Format-IPQFixedWidth -Text "IP质量体检报告：$($Result.Head.Address)" -Width $lineWidth -Align Center) -ForegroundColor Green
-    Write-Host (Format-IPQFixedWidth -Text 'https://github.com/xykt/IPQuality' -Width $lineWidth -Align Center) -ForegroundColor DarkCyan
-    Write-Host (Format-IPQFixedWidth -Text 'ipq' -Width $lineWidth -Align Center) -ForegroundColor Gray
+    Write-Host (Format-IPQFixedWidth -Text $script:RepositoryUrl -Width $lineWidth -Align Center) -ForegroundColor DarkCyan
     $reportTime = Get-IPQValue $Result.Head 'TimeLocal' (Get-IPQValue $Result.Head 'TimeUtc')
     $upstreamVersion = Get-IPQValue $Result.Head 'UpstreamVersion' (Get-IPQValue $Result.Head 'Version')
     Write-Host (Format-IPQFixedWidth -Text "报告时间：$reportTime  脚本版本：$upstreamVersion" -Width $lineWidth -Align Center) -ForegroundColor Gray
