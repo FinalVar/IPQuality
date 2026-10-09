@@ -44,9 +44,15 @@ $palette = @{Black='#101827'; DarkBlue='#1e3a8a'; DarkGreen='#166534'; DarkCyan=
     DarkRed='#991b1b'; DarkMagenta='#86198f'; DarkYellow='#92400e'; Gray='#d1d5db';
     DarkGray='#6b7280'; Blue='#60a5fa'; Green='#86efac'; Cyan='#67e8f9'; Red='#fca5a5';
     Magenta='#f0abfc'; Yellow='#fde68a'; White='#ffffff'}
+$foregroundPalette = $palette.Clone()
+$foregroundPalette.DarkCyan = '#22d3ee'
+$foregroundPalette.DarkGreen = '#4ade80'
+$foregroundPalette.DarkYellow = '#fbbf24'
+$foregroundPalette.DarkRed = '#f87171'
+$foregroundPalette.DarkGray = '#94a3b8'
 foreach ($part in $segments) {
     $text = [Security.SecurityElement]::Escape($part.text)
-    $color = if ($palette.ContainsKey($part.foreground)) { $palette[$part.foreground] } else { '#e5e7eb' }
+    $color = if ($foregroundPalette.ContainsKey($part.foreground)) { $foregroundPalette[$part.foreground] } else { '#e5e7eb' }
     $x = 32 + $part.column * 10
     $y = 96 + $part.row * 20
     $width = $part.cells * 10
