@@ -82,3 +82,6 @@ finally {
     }
     Remove-Item -LiteralPath $resolved -Recurse -Force
 }
+# The installer may probe Git in a source archive without .git. A successful
+# PowerShell test must not leak that expected native exit code into CI.
+exit 0
