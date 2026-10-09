@@ -159,10 +159,10 @@ IPv4 与 IPv6 在可见窗口中必须分别运行。双栈只用于 JSON、文�
 
 ## 上游同步与 README 冲突策略
 
-Windows 专有说明只放在 `windows/`，它们在上游不存在，正常同步不会冲突。根
-`README.md` 和 `README_EN.md` 只允许在
-`<!-- windows-native:start -->` 与 `<!-- windows-native:end -->` 之间维护一段短入口，
-其余内容尽量保持上游原样。
+`windows-native` 的根 `README.md` 和 `README_EN.md` 是 Windows 产品入口；完整
+使用与维护说明保留在 `windows/`。2026-10-10 起，上游完整 README 快照移到
+`docs/upstream/`，由 `PROVENANCE.md` 记录来源提交，根 README 明确链接上游、作者
+归属和 AGPL-3.0。保留 Windows 标记块便于自动检查入口。
 
 同步建议：
 
@@ -175,8 +175,9 @@ git switch windows-native
 git merge main
 ```
 
-发生 README 冲突时，先采用新的上游正文，再把完整 Windows 标记块放回标题下方。
-不得为了减少冲突删除上游作者、赞助商、许可证、截图或历史。
+发生 README 冲突时，保留 Windows 产品入口，把上游完整正文同步到
+`docs/upstream/` 并更新来源提交。不得丢弃上游作者、赞助商、许可证、截图或历史；
+上游正文中的相对链接沿用原仓库语义，来源说明提供对应固定提交原文链接。
 
 ## 版本与发布检查单
 
@@ -198,12 +199,19 @@ Windows 版本采用 `0.x.y`：
 - 公开 ZIP 包含安装器、基线文件和最新版 Windows 模块；
 - 默认分支仍为 `windows-native`。
 
+公开预览与稳定发布分开：预览必须通过离线、源码包校验、干净目录安装及同提交 CI，
+并在发行说明列明实际在线检查与未验证矩阵。未完成真实桌面、同出口原版对比或全面
+第三方服务核验时，只能标记为 prerelease，不得称为稳定版或完整验收。
+预览源码包使用 `scripts/Build-Release.ps1` 从干净 HEAD 构建；执行
+`scripts/Test-Release.ps1` 后，公开下载三个资产并再核对 SHA-256。
+固定提交和哈希可追溯不等于 GitHub 服务端启用了不可变发行或代码签名。
+
 ## 已知限制
 
 - 外部网页和未公开 API 随时可能变化，CI 无法证明实时服务长期可用。
 - DNSBL 上游列表含有失效、停放或特殊格式条目，错误和 `Marked` 必须结合明细解释。
 - 自动下载的 sing-box 目前仅固定 Windows x64 包；SIP003 插件节点尚不支持。
 - PowerShell 7 和 `curl.exe` 仍是运行依赖。
-- 分支 ZIP 是可变安装源，没有代码签名或不可变发行资产；正式大范围分发前应增加带
-  校验值的 GitHub Release。
+- 分支 ZIP 是可变安装源。版本化预览提供固定提交源码包和 SHA-256，但没有代码
+  签名；校验值不能替代来源信任，也不能保证第三方服务长期可用。
 - 真实窗口尺寸和字体需要交互式桌面，GitHub 托管 CI 只能覆盖静态合同和逻辑测试。

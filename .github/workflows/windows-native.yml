@@ -13,6 +13,8 @@ on:
       - "ip.sh"
       - "ref/**"
       - "windows/**"
+      - "scripts/**"
+      - "docs/**"
       - "README.md"
       - "README_EN.md"
   pull_request:
@@ -27,6 +29,8 @@ on:
       - "ip.sh"
       - "ref/**"
       - "windows/**"
+      - "scripts/**"
+      - "docs/**"
       - "README.md"
       - "README_EN.md"
   workflow_dispatch:
@@ -55,3 +59,10 @@ jobs:
       - name: Run offline regression suite
         shell: pwsh
         run: ./windows/tests/Smoke.Tests.ps1
+
+      - name: Build and verify release archive
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP 'ipquality-release'
+          ./scripts/Build-Release.ps1 -OutputDirectory $output
+          ./scripts/Test-Release.ps1 -ArtifactDirectory $output

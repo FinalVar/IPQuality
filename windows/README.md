@@ -18,13 +18,17 @@ Docker、WSL、Bash、`jq`、`dig` 或 `nc`。
 - PowerShell 7.2 或更新版本；
 - Windows 自带的 `curl.exe`。
 
-下载并解压
-[`windows-native` 分支 ZIP](https://github.com/FinalVar/IPQuality/archive/refs/heads/windows-native.zip)，
+从[版本化发行页](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.7.1-preview.1)
+下载 `latest.zip`，对照同页 `latest.sha256` 后解压，
 然后双击根目录的：
 
 ```text
 Install.cmd
 ```
+
+当前是 0.7.1 公开预览版，验证范围见[发行验证记录](../docs/verification-latest.md)。
+需要跟进未发布的开发版本时才使用
+[`windows-native` 分支 ZIP](https://github.com/FinalVar/IPQuality/archive/refs/heads/windows-native.zip)。
 
 也可以在 PowerShell 中运行：
 

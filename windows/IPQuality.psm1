@@ -1,7 +1,7 @@
 #Requires -Version 7.2
 Set-StrictMode -Version Latest
 
-$script:IPQualityVersion = '0.7.0'
+$script:IPQualityVersion = '0.7.1'
 $script:UpstreamVersion = 'unknown'
 $script:RepositoryUrl = 'https://github.com/FinalVar/IPQuality'
 $script:UpstreamRepositoryUrl = 'https://github.com/xykt/IPQuality'

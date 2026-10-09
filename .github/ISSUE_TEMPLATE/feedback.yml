@@ -1,0 +1,17 @@
+name: Windows feedback / Windows 使用反馈
+description: Explain what you tried and what would make the tool more useful.
+body:
+  - type: textarea
+    id: task
+    attributes:
+      label: What were you trying to check? / 你想排查什么？
+      description: Describe the task without private network details.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What worked, what was unclear? / 哪些有效，哪些不清楚？
+      description: Include Windows and PowerShell versions. Never include credentials or full IPs.
+    validations:
+      required: true

@@ -1,0 +1,39 @@
+name: Windows bug / Windows 问题
+description: Report an installation, routing or report problem with sanitized evidence.
+title: "[Windows] "
+body:
+  - type: markdown
+    attributes:
+      value: "请勿提交完整 IP、代理 URL、节点、密码或原始日志。Do not include full IPs, proxy URLs or credentials."
+  - type: input
+    id: version
+    attributes:
+      label: Version and environment / 版本与环境
+      placeholder: "0.7.1 preview; Windows 11; PowerShell 7.4; x64"
+    validations:
+      required: true
+  - type: dropdown
+    id: route
+    attributes:
+      label: Route / 检测路径
+      options:
+        - Auto-detected proxy / 自动代理
+        - Explicit proxy / 指定代理
+        - Direct / 直连
+        - Installation or offline demo / 安装或离线演示
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps, expected and actual result / 步骤、预期与实际结果
+      description: Replace sensitive values with placeholders. Include the sanitized error.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy / 隐私
+      options:
+        - label: "I removed full IPs, proxy URLs and credentials / 已移除完整 IP、代理地址与凭据"
+          required: true

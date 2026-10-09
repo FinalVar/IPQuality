@@ -1,231 +1,80 @@
-<p align="center">
-<img src="https://hits.xykt.de/ip.svg?action=view&count_bg=%2379C83D&title_bg=%23555555&title=Runs&edge_flat=false"/> 
-<img src="https://hits.xykt.de/ip_github.svg?action=hit&count_bg=%233DC8C0&title_bg=%23555555&title=Visits&edge_flat=false"/> 
-<a href="/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-blue.svg" alt="license" /></a>  
-</p>
+# IPQuality for Windows
 
-## IP质量体检脚本  -  [IP Quality Check Script (EN)](README_EN.md)
+**在 Windows 上检查代理出口、IP 风险与服务可达性。无需 Docker 或 WSL。**
+
+[English](README_EN.md) · [下载预览版](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.7.1-preview.1) · [完整使用说明](windows/README.md) · [反馈问题](https://github.com/FinalVar/IPQuality/issues/new/choose)
+
+[![Windows tests](https://github.com/FinalVar/IPQuality/actions/workflows/windows-native.yml/badge.svg?branch=windows-native)](https://github.com/FinalVar/IPQuality/actions/workflows/windows-native.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
 <!-- windows-native:start -->
-> [!IMPORTANT]
-> 本仓库的 `windows-native` 分支提供无需 Docker/WSL 的原生 PowerShell 7
-> 版本。下载
-> [Windows ZIP](https://github.com/FinalVar/IPQuality/archive/refs/heads/windows-native.zip)
-> 后双击 `Install.cmd`，以后输入 `ipq` 即可使用。功能、隐私边界、18 号
-> 74×47 无滚动条标准和兼容性说明见
-> [Windows README](windows/README.md)；维护与上游同步规则见
-> [Windows 维护规范](windows/MAINTENANCE.md)。
+这是 [xykt/IPQuality](https://github.com/xykt/IPQuality) 的社区 Windows 原生移植，
+由 FinalVar 维护。使用 PowerShell 7 和 Windows 自带的 `curl.exe`，提供按用户安装、
+显式代理路由、掩码报告与 JSON 导出。不是上游官方 Windows 发行版。
+
+## 开始使用
+
+1. 安装 [Microsoft PowerShell 7.2 或更新版本](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows)。
+2. 从[发行页](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.7.1-preview.1)下载 `latest.zip`，解压后双击 `Install.cmd`。不需要管理员权限。
+3. 重新打开终端，运行：
+
+```powershell
+ipq           # 检查本地代理的 IPv4 出口；没有可用代理就明确失败
+ipq -Direct   # 显式检查本机直连 IPv4 出口
+ipq -IPv6     # 检查代理的 IPv6 出口；不回退成 IPv4
+```
+
+仅想先看输出格式？解压后运行离线演示，不安装、不联网：
+
+```powershell
+pwsh -NoProfile -File .\windows\Show-Demo.ps1
+```
+
+![使用真实格式化器生成的离线合成数据示例，不代表任何真实 IP 的检测结果](docs/demo/latest.svg)
+
+## 它能回答什么
+
+| 问题 | 报告内容 |
+| --- | --- |
+| 当前测的是哪个出口？ | IPv4/IPv6、代理或直连、ASN 与地理信息 |
+| 不同风险库怎么看这个 IP？ | 各来源独立显示，保留冲突、未知与错误 |
+| 常见流媒体与 AI 服务是否可达？ | 状态、地区和证据；不保证付费账户或实际播放 |
+| 能否保存结果进一步排查？ | 默认掩码 JSON、文本导出与原版对比工具 |
+
+没有可用代理时不会自动改测直连。HTTP/媒体请求跟随所选代理；DNSBL 通过本机 DNS
+查询，代理模式不测 SMTP。详细语义见[路由说明](windows/README.md#路由语义)。
+
+## 下载与校验
+
+当前版本为 **0.7.1 公开预览版**。发行页提供固定提交打包的源代码 ZIP、
+`latest.sha256` 和记录版本、提交及文件哈希的 `latest.json`。分支 ZIP 会变化，
+需要复现时使用带版本标签的发行页。
+
+```powershell
+Get-FileHash .\latest.zip -Algorithm SHA256
+Get-Content .\latest.sha256
+```
+
+对照两处 SHA-256 后再安装。校验用于核对下载完整性，不等同于代码签名。
+演示使用合成数据。控制台当前主要显示中文，英文文档不代表英文界面。
+
+## 隐私与验证边界
+
+- 默认掩码 IP，不上传组装后的完整报告；检测服务仍会看到被测出口 IP。
+- 不同数据库的分数不是同一量表，IP 归属信息也不是“住宅 IP”保证。
+- CI 验证离线逻辑与发行包安装。公开预览尚未覆盖所有 Windows 版本、物理桌面布局、
+  IPv6 网络和当前全部第三方服务；见[验证记录](docs/verification-latest.md)。
+- 分享报告前检查内容，不要在 Issue 中粘贴代理地址、节点、凭据或完整 IP。
+
+遇到问题请使用[反馈模板](https://github.com/FinalVar/IPQuality/issues/new/choose)，
+说明系统、PowerShell 版本、执行方式和脱敏错误。支持范围和卸载见[完整说明](windows/README.md)。
 <!-- windows-native:end -->
 
-**支持OS/Platform：Ubuntu | Debian | Linux Mint | Fedora | Red Hat Enterprise Linux (RHEL) | CentOS | Arch Linux | Manjaro | Alpine Linux | AlmaLinux | Rocky Linux | macOS | Anolis OS | Alibaba Cloud Linux | SUSE Linux | openSUSE | Void Linux | Windows (PowerShell 7 或 Docker)**
+## 上游与许可
 
-- 中英文双语言支持
-- 支持IPv4/IPv6双栈查询
-- 精美排版，直观显示，多终端单屏优化展示，便于截图分享
-- 基础信息、IP类型、风险评分、风险因子、流媒体解锁、邮局检测六大模块
-- 基础数据源自*Maxmind*数据库
-- 风险信息 *IPinfo / ipregistry / ipapi / AbuseIPDB / IP2Location / IPQS / DB-IP / Scamalytics* 多数据库整合
-- 流媒体及AI多个服务商 *TikTok / Disney+ / Netflix / Youtube / AmazonPrimeVideo / Reddit / ChatGPT* 解锁及解锁类型检测
-- 多邮局服务商 *Gmail / Outlook / Yahoo / Apple / QQ / Mail.ru / AOL / GMX / Mail.com / 163 / Sohu / Sina* 连通性检测
-- IP地址黑名单400+数据库检测
+检测口径和 Bash 实现来自 **[xykt/IPQuality](https://github.com/xykt/IPQuality)**。
+Windows 目录是衍生实现，继续使用 [AGPL-3.0](LICENSE)。上游作者、致谢、赞助商和历史
+保留在[中文原文](docs/upstream/README.md)及[英文原文](docs/upstream/README_EN.md)；
+来源提交见[保存说明](docs/upstream/PROVENANCE.md)。Linux/macOS 用户请使用上游。
 
-##### 屏幕截图
-![截图](https://raw.githubusercontent.com/xykt/IPQuality/main/res/cn_IPv4.svg)
-
-## 使用方法
-
-### 便捷模式：交互界面
-
-![Net](https://github.com/xykt/ScriptMenu/raw/main/res/IP_CN.png)
-
-##### Bash：
-````bash
-bash <(curl -Ls https://Check.Place) -I
-````
-
-##### Docker：
-- Linux
-````bash
-docker run --rm --net=host -it xykt/check -I && docker rmi xykt/check > /dev/null 2>&1
-````
-
-- Windows (CMD)
-````bash
-docker run --rm --net=host -it xykt/check -I & docker rmi xykt/check > NUL 2>&1
-````
-
-### 高级模式：参数运行
-
-![Help](https://github.com/xykt/IPQuality/raw/main/res/help.png)
-
-##### 默认双栈检测：
-````bash
-bash <(curl -Ls https://IP.Check.Place)
-````
-
-##### 只检测IPv4结果：
-````bash
-bash <(curl -Ls https://IP.Check.Place) -4
-````
-
-##### 只检测IPv6结果：
-````bash
-bash <(curl -Ls https://IP.Check.Place) -6
-````
-
-##### 指定检测网卡：
-````bash
-bash <(curl -Ls https://IP.Check.Place) -i eth0
-````
-
-##### 指定代理服务器：
-````bash
-bash <(curl -Ls https://IP.Check.Place) -x http://username:password@proxyserver:port
-bash <(curl -Ls https://IP.Check.Place) -x https://username:password@proxyserver:port
-bash <(curl -Ls https://IP.Check.Place) -x socks5://username:password@socksproxy:port
-````
-
-##### 选择脚本语言为英文（任选其一）：
-````bash
-bash <(curl -Ls https://IP.Check.Place) -E
-bash <(curl -Ls https://IP.Check.Place) -l en
-````
-
-##### 跳过检测系统及安装依赖：
-````bash
-bash <(curl -Ls https://IP.Check.Place) -n
-````
-
-##### 自动安装依赖：
-````bash
-bash <(curl -Ls https://IP.Check.Place) -y
-````
-
-##### 报告展示完整IP地址：
-````bash
-bash <(curl -Ls https://IP.Check.Place) -f
-````
-
-##### 输出JSON结果（[输出示例](https://github.com/xykt/IPQuality/blob/main/res/output.json)）：
-````bash
-bash <(curl -Ls https://IP.Check.Place) -j
-````
-
-##### 输出报告ANSI/JSON/纯文本至文件：
-````bash
-bash <(curl -Ls https://IP.Check.Place) -o /path/to/file.ansi
-bash <(curl -Ls https://IP.Check.Place) -o /path/to/file.json
-bash <(curl -Ls https://IP.Check.Place) -o /path/to/file.txtoranyother
-````
-
-##### 基础信息多语言支持：
-````bash
-bash <(curl -Ls https://IP.Check.Place) -l jp|es|de|fr|ru|pt
-````
-
-##### 隐私模式——禁用在线报告生成功能：
-````bash
-bash <(curl -Ls https://IP.Check.Place) -p
-````
-
-##### Docker（支持运行参数，须在```&```前插入）：
-- Linux
-````bash
-docker run --rm --net=host -it xykt/ipquality && docker rmi xykt/ipquality > /dev/null 2>&1
-````
-
-- Windows (CMD)
-````cmd
-docker run --rm --net=host -it xykt/ipquality & docker rmi xykt/ipquality > NUL 2>&1
-````
-
-## 脚本更新
-
-2026/01/24 12:40 将Spotify检测替换为Reddit检测
-
-2026/01/15 17:23 修正不规范的JSON
-
-2025/08/03 00:00 增加Docker运行方式
-
-2025/08/01 16:15 增加-p隐私模式，禁用在线报告生成功能
-
-2025/07/30 16:30 将所有HTTP请求替换为HTTPS以提升脚本安全性
-
-2025/06/02 21:25 修复25端口检测的错误逻辑，规范化邮件服务商连通性检测方法
-
-2025/04/23 18:00 增加-o输出报告ANSI/JSON/纯文本至文件
-
-2025/04/19 21:00 增加-j的JSON输出模式
-
-2025/03/13 23:15 增加-y自动安装依赖，-n跳过操作系统及依赖检查
-
-2024/11/09 00:30 增加Cloudflare风险评分，修复IP2Location偶发IP类型判断BUG
-
-2024/10/06 01:15 修复极个别运行脚本报错问题
-
-2024/07/23 23:50 增加运行参数-f使报告显示完整IP地址
-
-2024/07/22 01:50 安装依赖包前增加询问，修复Disney+解锁类型错误
-
-2024/06/27 01:00 增加Anolis OS | Alibaba Cloud Linux | SUSE Linux | openSUSE系统支持
-
-2024/05/30 01:15 增加macOS系统支持
-
-2024/05/28 18:00 修复了指定网卡/代理服务器仍然检测默认IP的bug
-
-2024/05/17 00:45 增加报告svg图片分享链接，修复一些排版问题
-
-2024/05/11 23:20 修复因网关阻断25端口导致的邮件检测时间过长的问题，修复Tiktok IPv6结果不准确的bug
-
-2024/05/10 17:50 修复未安装sudo系统无法正常安装依赖的bug
-
-2024/05/10 11:00 增加指定网卡及代理服务器检测支持
-
-2024/05/09 15:00 修正不规范内网IP导致的错误，修正其他若干bug
-
-2024/05/08 23:00 修正Netflix澳洲检测结果不正确的bug
-
-2024/05/08 18:10 更新依赖程序dig检测及安装
-
-2024/05/08 00:00 脚本发布
-
-## 脚本贡献
-
-**Acknowledgments:**
-
-| 赞助商 | 商标 | 网址 | 
-| - | - | - | 
-| IP2Location | ![ip2location_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_ip2location.png) | [https://ip2location.io](https://ip2location.io)</br>[https://ip2location.com](https://ip2location.com) | 
-| Scamalytics | ![scamalytics_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_scamalytics.png) | [https://scamalytics.com](https://scamalytics.com) | 
-
-- 衷心感谢主流IP风险数据库[AbuseIPDB](https://www.abuseipdb.com/)/[Cloudflare](https://cloudflare.com/)/[DB-IP](https://db-ip.com/)/[IP2Location](https://www.ip2location.io/)/[ipapi](https://ipapi.is/)/[IPinfo](https://ipinfo.io/)/[IPQS](https://www.ipqualityscore.com/)/[ipregistry](https://ipregistry.co/)/[Scamalytics](https://scamalytics.com/)提供的风险数据（排名不分先后）
-
-- 感谢[lmc999](https://github.com/lmc999/RegionRestrictionCheck)，本脚本局部代码参考原版流媒体解锁检测脚本
-
-- 感谢[spiritLHLS](https://github.com/spiritLHLS/ecs)，本脚本局部代码参考融合怪测评脚本
-
-**服务器赞助商（排名不分先后）**
-
-| 赞助商 | 商标 | 网址 | 
-| - | - | - | 
-| V.PS | ![vps_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_vps.png) | [https://v.ps](https://v.ps)| 
-| BAGE | ![bage_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_bage.png) | [https://bagevm.com](https://bagevm.com)|
-| LisaHost</br>丽萨主机 | ![lisa_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_lisa.png) | [https://lisahost.com](https://lisahost.com)|   
-| RapidProxy</br>`原生IP` | ![rapidproxy_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_rapidproxy.png) | [https://rapidproxy.io](https://www.rapidproxy.io/?ref=gitipquality)|   
-| 蔭雲</br>YINNET | ![yinnet_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_yinnet.png) | [https://yin-net.com](https://yin-net.com)| 
-| Swiftproxy</br>`原生IP` | ![swiftproxy_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_swiftproxy.png) | [https://swiftproxy.net](https://www.swiftproxy.net/?ref=ipquality)|   
-| IPWO</br>`原生IP` | ![ipwo_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_ipwo.png) | [https://ipwo.net](https://www.ipwo.net/?ref=githubxykt)|   
-| IPPeak</br>`原生IP` | ![ippeak_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_ippeak.png) | [https://ippeak.com](https://www.ippeak.com/?utm_t=1&utm_i=125)|  
-| ColaProxy</br>`原生IP` | ![colaproxy_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_colaproxy.png) | [https://colaproxy.com](https://colaproxy.com/?utm_source=IPQuality&utm_medium=IPQuality&ref=IPQuality)|  
-| VMRack | ![vmrack_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_vmrack.png) | [https://vmrack.com](https://www.vmrack.net?affid=ipeck)| 
-
-##### *E-Mail: sponsor@check.place Telegram Bot: https://t.me/xythebot*
-**仅接受长期稳定运营，信誉良好的商家*
-
-**Stars History:**
-
-![Stargazers over time](https://star.xykt.de/xykt/IPQuality.svg?width=1024&height=400&maxRequestPages=20&xTicks=9&yTicks=6&showTitle=false&samplePointRadius=4&lineColor=green&samplePointColor=green&fillColor=green)
-
-**Daily Runs History:**
-
-![daily_runs_history](https://hits.xykt.de/history/ip.svg?days=46&chartType=bar&title=IP%E8%B4%A8%E9%87%8F%E4%BD%93%E6%A3%80%E8%84%9A%E6%9C%AC%E6%AF%8F%E6%97%A5%E8%BF%90%E8%A1%8C%E9%87%8F%E7%BB%9F%E8%AE%A1&width=1024&height=400&color=green)
+[维护规范](windows/MAINTENANCE.md) · [发行流程](docs/releasing.md)

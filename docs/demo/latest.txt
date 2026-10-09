@@ -1,0 +1,43 @@
+OFFLINE DEMO / SYNTHETIC DATA
+########################################################################
+                       IP质量体检报告：203.0.*.*
+                 https://github.com/FinalVar/IPQuality
+           报告时间：2026-01-01 00:00:00 UTC  脚本版本：0.7.1
+########################################################################
+一、基础信息（Maxmind 数据库）
+自治系统号：          AS64500
+组织：                Example network (synthetic)
+城市：                Test State, Test City
+使用地：              [-] Test Country, [-] -
+注册地：              [-] Test Country
+时区：                Etc/UTC
+IP类型：                   未知
+二、IP类型属性
+数据库：      IPinfo    ipregistry    ipapi    IP2Location  AbuseIPDB
+使用类型：     家宽        家宽        家宽        家宽        家宽
+公司类型：     家宽        家宽        家宽        家宽        家宽
+三、风险评分
+风险等级：        极低       低        中等       高       极高
+IP2Location：       12|低风险
+SCAMALYTICS：                          42|中风险
+ipapi：          0.1%|极低风险
+AbuseIPDB：      0|低风险
+IPQS：                          76|可疑IP
+四、风险因子
+库： IP2Location ipapi ipregistry IPQS SCAMALYTICS ipdata IPinfo DB-IP
+地区：    [US]    [US]    [US]    [US]    [US]    [US]    [US]     -
+代理：     否      否      否      否      是      否      否      无
+Tor：      否      否      否      否      否      否      否      无
+VPN：      否      否      否      否      否      否      否      无
+服务器：   否      否      否      否      否      否      否      无
+滥用：     无      无      无      无      无      无      无      无
+机器人：   无      无      无      无      无      无      无      无
+五、流媒体及AI服务解锁检测
+服务商：  TikTok   Disney+  Netflix  YouTube AmazonPV  Reddit   ChatGPT
+状态：     解锁     解锁     解锁     解锁     解锁     失败     解锁
+地区：     [US]     [US]     [US]     [US]     [US]       -      [US]
+方式：     原生     原生     原生     原生     原生       -      原生
+六、邮局连通性及黑名单检测
+本地25端口出站：已跳过
+IP地址黑名单数据库：  已跳过
+========================================================================

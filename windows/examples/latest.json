@@ -1,0 +1,342 @@
+{
+  "Head": {
+    "Version": "0.7.1",
+    "Address": "203.0.*.*",
+    "AddressFamily": "IPv4",
+    "RouteType": "Direct",
+    "TimeUtc": "2026-01-01 00:00:00 UTC",
+    "Demo": true,
+    "Repository": "https://github.com/FinalVar/IPQuality",
+    "Upstream": "https://github.com/xykt/IPQuality"
+  },
+  "Info": {
+    "ASN": 64500,
+    "Organization": "Example network (synthetic)",
+    "City": "Test City",
+    "Subdivision": "Test State",
+    "Country": "Test Country",
+    "RegisteredCountry": "Test Country",
+    "TimeZone": "Etc/UTC",
+    "Map": ""
+  },
+  "DataSources": [
+    {
+      "Name": "IPinfo",
+      "Available": true,
+      "CountryCode": "US",
+      "UsageType": "isp",
+      "CompanyType": "isp",
+      "Score": null,
+      "RiskLevel": "",
+      "Flags": {
+        "Proxy": false,
+        "Tor": false,
+        "VPN": false,
+        "Server": false,
+        "Abuser": null,
+        "Robot": null
+      },
+      "Error": ""
+    },
+    {
+      "Name": "ipregistry",
+      "Available": true,
+      "CountryCode": "US",
+      "UsageType": "isp",
+      "CompanyType": "isp",
+      "Score": null,
+      "RiskLevel": "",
+      "Flags": {
+        "Proxy": false,
+        "Tor": false,
+        "VPN": false,
+        "Server": false,
+        "Abuser": null,
+        "Robot": null
+      },
+      "Error": ""
+    },
+    {
+      "Name": "ipapi",
+      "Available": true,
+      "CountryCode": "US",
+      "UsageType": "isp",
+      "CompanyType": "isp",
+      "Score": 0.1,
+      "RiskLevel": "",
+      "Flags": {
+        "Proxy": false,
+        "Tor": false,
+        "VPN": false,
+        "Server": false,
+        "Abuser": null,
+        "Robot": null
+      },
+      "Error": ""
+    },
+    {
+      "Name": "IP2Location",
+      "Available": true,
+      "CountryCode": "US",
+      "UsageType": "isp",
+      "CompanyType": "isp",
+      "Score": 12,
+      "RiskLevel": "",
+      "Flags": {
+        "Proxy": false,
+        "Tor": false,
+        "VPN": false,
+        "Server": false,
+        "Abuser": null,
+        "Robot": null
+      },
+      "Error": ""
+    },
+    {
+      "Name": "AbuseIPDB",
+      "Available": true,
+      "CountryCode": "US",
+      "UsageType": "isp",
+      "CompanyType": "isp",
+      "Score": 0,
+      "RiskLevel": "",
+      "Flags": {
+        "Proxy": false,
+        "Tor": false,
+        "VPN": false,
+        "Server": false,
+        "Abuser": null,
+        "Robot": null
+      },
+      "Error": ""
+    },
+    {
+      "Name": "Scamalytics",
+      "Available": true,
+      "CountryCode": "US",
+      "UsageType": "isp",
+      "CompanyType": "isp",
+      "Score": 42,
+      "RiskLevel": "",
+      "Flags": {
+        "Proxy": true,
+        "Tor": false,
+        "VPN": false,
+        "Server": false,
+        "Abuser": null,
+        "Robot": null
+      },
+      "Error": ""
+    },
+    {
+      "Name": "IPQS",
+      "Available": true,
+      "CountryCode": "US",
+      "UsageType": "isp",
+      "CompanyType": "isp",
+      "Score": 76,
+      "RiskLevel": "",
+      "Flags": {
+        "Proxy": false,
+        "Tor": false,
+        "VPN": false,
+        "Server": false,
+        "Abuser": null,
+        "Robot": null
+      },
+      "Error": ""
+    },
+    {
+      "Name": "DB-IP",
+      "Available": false,
+      "CountryCode": "",
+      "UsageType": "",
+      "CompanyType": "",
+      "Score": null,
+      "RiskLevel": "",
+      "Flags": {
+        "Proxy": null,
+        "Tor": null,
+        "VPN": null,
+        "Server": null,
+        "Abuser": null,
+        "Robot": null
+      },
+      "Error": "Synthetic example of an unavailable source"
+    },
+    {
+      "Name": "ipdata",
+      "Available": true,
+      "CountryCode": "US",
+      "UsageType": "isp",
+      "CompanyType": "isp",
+      "Score": null,
+      "RiskLevel": "",
+      "Flags": {
+        "Proxy": false,
+        "Tor": false,
+        "VPN": false,
+        "Server": false,
+        "Abuser": null,
+        "Robot": null
+      },
+      "Error": ""
+    }
+  ],
+  "TypeAssessment": {
+    "Verdict": "家宽",
+    "HomeSignals": 5,
+    "DatacenterSignals": 0,
+    "Sources": [
+      {
+        "Name": "IPinfo",
+        "Available": true,
+        "UsageType": "isp",
+        "UsageLabel": "家宽",
+        "CompanyType": "isp",
+        "CompanyLabel": "家宽"
+      },
+      {
+        "Name": "ipregistry",
+        "Available": true,
+        "UsageType": "isp",
+        "UsageLabel": "家宽",
+        "CompanyType": "isp",
+        "CompanyLabel": "家宽"
+      },
+      {
+        "Name": "ipapi",
+        "Available": true,
+        "UsageType": "isp",
+        "UsageLabel": "家宽",
+        "CompanyType": "isp",
+        "CompanyLabel": "家宽"
+      },
+      {
+        "Name": "IP2Location",
+        "Available": true,
+        "UsageType": "isp",
+        "UsageLabel": "家宽",
+        "CompanyType": "isp",
+        "CompanyLabel": "家宽"
+      },
+      {
+        "Name": "AbuseIPDB",
+        "Available": true,
+        "UsageType": "isp",
+        "UsageLabel": "家宽",
+        "CompanyType": "isp",
+        "CompanyLabel": "家宽"
+      }
+    ]
+  },
+  "Consensus": {
+    "Proxy": {
+      "Positive": 1,
+      "Negative": 7,
+      "Available": 8,
+      "Verdict": "Mixed"
+    },
+    "Tor": {
+      "Positive": 0,
+      "Negative": 8,
+      "Available": 8,
+      "Verdict": "NotDetected"
+    },
+    "VPN": {
+      "Positive": 0,
+      "Negative": 8,
+      "Available": 8,
+      "Verdict": "NotDetected"
+    },
+    "Server": {
+      "Positive": 0,
+      "Negative": 8,
+      "Available": 8,
+      "Verdict": "NotDetected"
+    },
+    "Abuser": {
+      "Positive": 0,
+      "Negative": 0,
+      "Available": 0,
+      "Verdict": "Unknown"
+    },
+    "Robot": {
+      "Positive": 0,
+      "Negative": 0,
+      "Available": 0,
+      "Verdict": "Unknown"
+    }
+  },
+  "Media": {
+    "TikTok": {
+      "Name": "TikTok",
+      "Status": "Available",
+      "Region": "US",
+      "Type": "原生",
+      "TypeEvidence": "synthetic",
+      "Evidence": "synthetic",
+      "Error": ""
+    },
+    "DisneyPlus": {
+      "Name": "DisneyPlus",
+      "Status": "Available",
+      "Region": "US",
+      "Type": "原生",
+      "TypeEvidence": "synthetic",
+      "Evidence": "synthetic",
+      "Error": ""
+    },
+    "Netflix": {
+      "Name": "Netflix",
+      "Status": "Available",
+      "Region": "US",
+      "Type": "原生",
+      "TypeEvidence": "synthetic",
+      "Evidence": "synthetic",
+      "Error": ""
+    },
+    "YouTubePremium": {
+      "Name": "YouTubePremium",
+      "Status": "Available",
+      "Region": "US",
+      "Type": "原生",
+      "TypeEvidence": "synthetic",
+      "Evidence": "synthetic",
+      "Error": ""
+    },
+    "AmazonPrimeVideo": {
+      "Name": "AmazonPrimeVideo",
+      "Status": "Available",
+      "Region": "US",
+      "Type": "原生",
+      "TypeEvidence": "synthetic",
+      "Evidence": "synthetic",
+      "Error": ""
+    },
+    "Reddit": {
+      "Name": "Reddit",
+      "Status": "Error",
+      "Region": "",
+      "Type": "",
+      "TypeEvidence": "synthetic",
+      "Evidence": "synthetic",
+      "Error": "Synthetic network failure"
+    },
+    "ChatGPT": {
+      "Name": "ChatGPT",
+      "Status": "Available",
+      "Region": "US",
+      "Type": "原生",
+      "TypeEvidence": "synthetic",
+      "Evidence": "synthetic",
+      "Error": ""
+    }
+  },
+  "Mail": null,
+  "DNSBlacklist": null,
+  "Warnings": [
+    "OFFLINE DEMO: all values are synthetic; no network request was made.",
+    "Synthetic provider disagreement and unavailable-source examples are intentional."
+  ]
+}

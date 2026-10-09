@@ -20,13 +20,18 @@ Requirements:
 - PowerShell 7.2 or newer;
 - the Windows-provided `curl.exe`.
 
-Download and extract the
-[`windows-native` ZIP](https://github.com/FinalVar/IPQuality/archive/refs/heads/windows-native.zip),
-then double-click:
+Download `latest.zip` from the
+[versioned release](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.7.1-preview.1),
+compare its SHA-256 with `latest.sha256`, extract, then double-click:
 
 ```text
 Install.cmd
 ```
+
+This is the 0.7.1 public preview. See the
+[verification scope](../docs/verification-latest.md). The
+[`windows-native` ZIP](https://github.com/FinalVar/IPQuality/archive/refs/heads/windows-native.zip)
+is a moving development snapshot, not a fixed release.
 
 A new installation goes to `%LOCALAPPDATA%\Programs\IPQuality` and does not
 require administrator rights. A supported legacy installation under

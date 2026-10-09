@@ -1,228 +1,89 @@
-<p align="center">
-<img src="https://hits.xykt.de/ip.svg?action=view&count_bg=%2379C83D&title_bg=%23555555&title=Runs&edge_flat=false"/> 
-<img src="https://hits.xykt.de/ip_github.svg?action=hit&count_bg=%233DC8C0&title_bg=%23555555&title=Visits&edge_flat=false"/> 
-<a href="/LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-blue.svg" alt="license" /></a>  
-</p>
+# IPQuality for Windows
 
-## IP Quality Check Script  -  [IP质量体检脚本 (中文)](README.md)
+**Inspect your proxy exit IP, risk signals and service reachability on Windows. No Docker or WSL.**
+
+[中文](README.md) · [Download preview](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.7.1-preview.1) · [User guide](windows/README_EN.md) · [Report a problem](https://github.com/FinalVar/IPQuality/issues/new/choose)
+
+[![Windows tests](https://github.com/FinalVar/IPQuality/actions/workflows/windows-native.yml/badge.svg?branch=windows-native)](https://github.com/FinalVar/IPQuality/actions/workflows/windows-native.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
 <!-- windows-native:start -->
-> [!IMPORTANT]
-> The `windows-native` branch adds a native PowerShell 7 edition that requires
-> neither Docker nor WSL. Download the
-> [Windows ZIP](https://github.com/FinalVar/IPQuality/archive/refs/heads/windows-native.zip),
-> double-click `Install.cmd`, then use the `ipq` command. See the
-> [Windows README](windows/README_EN.md) for behavior, privacy limits, and the
-> 18-point 74×47 no-scroll display contract. Maintainer and upstream-sync rules
-> are in [Windows maintenance](windows/MAINTENANCE.md) (Chinese).
+A community PowerShell port of [xykt/IPQuality](https://github.com/xykt/IPQuality),
+maintained by FinalVar. It uses PowerShell 7 and Windows `curl.exe`, with per-user
+installation, explicit proxy routing, masked reports and JSON export.
+This is not an official upstream Windows release.
+
+## Get started
+
+1. Install [Microsoft PowerShell 7.2 or newer](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows).
+2. Download `latest.zip` from the [versioned release](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.7.1-preview.1), extract it and double-click `Install.cmd`. Administrator rights are not required.
+3. Open a new terminal:
+
+```powershell
+ipq           # Check a detected local proxy's IPv4 exit; fail if unavailable
+ipq -Direct   # Explicitly check this machine's direct IPv4 exit
+ipq -IPv6     # Check the proxy's IPv6 exit; do not substitute IPv4
+```
+
+To inspect the output before installing, run the offline demo from the extracted folder:
+
+```powershell
+pwsh -NoProfile -File .\windows\Show-Demo.ps1
+```
+
+![Offline synthetic data rendered by the real formatter; not a real IP measurement](docs/demo/latest.svg)
+
+## What it tells you
+
+| Question | Output |
+| --- | --- |
+| Which exit is being tested? | Address family, route, ASN and geography |
+| How do risk providers classify it? | Separate sources, including conflicts, unknowns and errors |
+| Are streaming and AI services reachable? | Status, region and evidence; not proof of account access or playback |
+| Can I investigate further? | Masked JSON, text export and an upstream comparison tool |
+
+Missing proxies never silently fall back to a direct connection. HTTP and media
+requests follow the selected proxy; DNSBL uses local DNS, and SMTP is skipped
+in proxy mode. See the [routing contract](windows/README_EN.md).
+
+## Downloads and verification
+
+The current release is **0.7.1 public preview**. Its versioned release contains
+`latest.zip`, `latest.sha256`, and `latest.json` with the source commit and file
+hashes. Use a versioned release for a repeatable download; branch ZIPs change.
+
+```powershell
+Get-FileHash .\latest.zip -Algorithm SHA256
+Get-Content .\latest.sha256
+```
+
+Compare both hashes before installation. This verifies download integrity; it
+is not a code signature. The console currently uses mainly Chinese labels.
+The English guide does not imply an English interface. Demo data is synthetic.
+
+## Privacy and limits
+
+- IPs are masked by default. Assembled reports are not uploaded, but contacted
+  services can observe the tested exit IP.
+- Provider scores are different scales. Geographic registration does not
+  establish that an IP is residential or accepted by every service.
+- CI covers offline behavior and archive installation. Windows version coverage,
+  physical desktop layout, IPv6 and all current third-party services have not
+  been revalidated for this preview. See [verification scope](docs/verification-latest.md).
+- Review reports before sharing. Do not post proxy URLs, node credentials,
+  secrets or full IP addresses in issues.
+
+Use the [issue templates](https://github.com/FinalVar/IPQuality/issues/new/choose)
+with your OS, PowerShell version, command shape and sanitized error.
+See the [full guide](windows/README_EN.md) for support and uninstall instructions.
 <!-- windows-native:end -->
 
-**Supported OS/Platform: Ubuntu | Debian | Linux Mint | Fedora | Red Hat Enterprise Linux (RHEL) | CentOS | Arch Linux | Manjaro | Alpine Linux | AlmaLinux | Rocky Linux | macOS | Anolis OS | Alibaba Cloud Linux | SUSE Linux | openSUSE | Void Linux | Windows (PowerShell 7 or Docker)**
-
-- Bilingual support in English and Chinese
-- Supports dual-stack queries for IPv4/IPv6
-- Beautifully formatted, intuitive display, optimized for single-screen multi-terminal display, facilitating screenshot sharing
-- Six modules: Basic Information, IP Type, Risk Score, Risk Factors, Streaming Media Unlocking, and Post Office Check
-- Basic data sourced from the *Maxmind* database
-- Risk information integrated from multiple databases: *IPinfo / ipregistry / ipapi / AbuseIPDB / IP2Location / IPQS / DB-IP / Scamalytics*
-- Streaming and AI service providers' unlocking and type detection: *TikTok / Disney+ / Netflix / Youtube / AmazonPrimeVideo / Reddit / ChatGPT*
-- Connectivity tests for multiple email providers: *Gmail / Outlook / Yahoo / Apple / QQ / Mail.ru / AOL / GMX / Mail.com / 163 / Sohu / Sina*
-- Over 400 IP address blacklist database checks
-
-##### Screenshots
-![Screenshot](https://raw.githubusercontent.com/xykt/IPQuality/main/res/en_IPv4.svg)
-
-## Usage
-
-### Easy Mode: Run with Interactive Interface
-
-![Net](https://github.com/xykt/ScriptMenu/raw/main/res/IP_EN.png)
-
-##### Bash:
-````bash
-bash <(curl -Ls https://Check.Place) -EI
-````
-
-##### Docker:
-- Linux
-````bash
-docker run --rm --net=host -it xykt/check -EI && docker rmi xykt/check > /dev/null 2>&1
-````
-
-- Windows (CMD)
-````bash
-docker run --rm --net=host -it xykt/check -EI & docker rmi xykt/check > NUL 2>&1
-````
-
-### Advanced Mode: Run with Parameters
-
-![Help](https://github.com/xykt/IPQuality/raw/main/res/help.png)
-
-##### English version of dual-stack test (Either):
-````bash
-bash <(curl -Ls https://IP.Check.Place) -E
-bash <(curl -Ls https://IP.Check.Place) -l en
-````
-
-##### IPv4 only test:
-````bash
-bash <(curl -Ls https://IP.Check.Place) -E4
-````
-
-##### IPv6 only test:
-````bash
-bash <(curl -Ls https://IP.Check.Place) -E6
-````
-
-##### Specify network interface:
-````bash
-bash <(curl -Ls https://IP.Check.Place) -E -i eth0
-````
-
-##### Specify proxy server:
-````bash
-bash <(curl -Ls https://IP.Check.Place) -E -x http://username:password@proxyserver:port
-bash <(curl -Ls https://IP.Check.Place) -E -x https://username:password@proxyserver:port
-bash <(curl -Ls https://IP.Check.Place) -E -x socks5://username:password@socksproxy:port
-````
-
-##### Skip checking OS and dependencies:
-
-```bash
-bash <(curl -Ls https://IP.Check.Place) -En
-```
-
-##### Auto-install dependencies:
-
-```bash
-bash <(curl -Ls https://IP.Check.Place) -Ey
-```
-
-##### Show full IP on report:
-````bash
-bash <(curl -Ls https://IP.Check.Place) -Ef
-````
-
-##### JSON output ([Example Output](https://github.com/xykt/IPQuality/blob/main/res/output.json))：
-````bash
-bash <(curl -Ls https://IP.Check.Place) -Ej
-````
-
-##### Output report to file in ANSI/JSON/Text format:
-````bash
-bash <(curl -Ls https://IP.Check.Place) -o /path/to/file.ansi
-bash <(curl -Ls https://IP.Check.Place) -o /path/to/file.json
-bash <(curl -Ls https://IP.Check.Place) -o /path/to/file.txtoranyother
-````
-
-##### Basic information multi-language support:
-````bash
-bash <(curl -Ls https://IP.Check.Place) -l jp|es|de|fr|ru|pt
-````
-
-##### Privacy mode - Disable online report link:
-````bash
-bash <(curl -Ls https://IP.Check.Place) -Ep
-````
-
-##### Docker (supports runtime arguments; insert them before the ```&```):
-- Linux
-````bash
-docker run --rm --net=host -it xykt/ipquality -E && docker rmi xykt/ipquality > /dev/null 2>&1
-````
-
-- Windows (CMD)
-````bash
-docker run --rm --net=host -it xykt/ipquality -E & docker rmi xykt/ipquality > NUL 2>&1
-````
-
-## Script Updates
-
-2026/01/24 12:40 Replace Spotify detection with Reddit detection
-
-2026/01/15 17:23 Fix non-standard JSON
-
-2025/08/03 00:00 Add Docker support
-
-2025/08/01 16:15 Add -p for privacy mode, which disables online report links
-
-2025/07/30 16:30 Replace all HTTP requests with HTTPS to improve script security
-
-2025/06/02 21:25 Fix the error logic in port 25 detection and standardize the connectivity testing method for email service providers
-
-2025/04/23 18:00 Add -o to output report to file in ANSI/JSON/Text format
-
-2025/04/19 21:00 Add -j for JSON mode
-
-2025/03/13 23:15 Add -y -n for dependencies auto-install/skip
-
-2024/11/09 00:30 Add Cloudflare threat score, fix IP2Location IP type bug
-
-2024/10/06 01:15 Fixed bug causing script errors in very rare cases
-
-2024/07/23 23:50 Add parameter -f to show full IP address on report
-
-2024/07/22 01:50 Add prompt before installing dependent packages, fix Disney+ bug
-
-2024/06/27 01:00 Add Anolis OS | Alibaba Cloud Linux | SUSE Linux | openSUSE support
-
-2024/05/30 01:15 Add macOS support
-
-2024/05/28 18:00 Fixed bug where default IP was detected for specified network interface/proxy server
-
-2024/05/17 00:45 Add report svg image sharing link and fix some layout problems
-
-2024/05/11 23:20 Fixed mail detection taking too long due to gateway blocking port 25, fix inaccurate Tiktok IPv6 results
-
-2024/05/10 17:50 Fix dependency installation issue with no sudo installed
-
-2024/05/10 11:00 Added support for specified network interface and proxy server
-
-2024/05/09 15:00 Corrected errors caused by non-standard private IP addresses, and fixed several other bugs
-
-2024/05/08 23:00 Fixed a bug affecting incorrect detection results for Netflix Australia
-
-2024/05/08 18:10 Updated the dependency checks and installation for the 'dig' program
-
-2024/05/08 00:00 Script published
-
-## Script Contributions
-
-**Acknowledgments:**
-
-| Sponsor | Logo | Link | 
-| - | - | - | 
-| IP2Location | ![ip2location_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_ip2location.png) | [https://ip2location.io](https://ip2location.io)</br>[https://ip2location.com](https://ip2location.com) | 
-| Scamalytics | ![scamalytics_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_scamalytics.png) | [https://scamalytics.com](https://scamalytics.com) | 
-
-- Sincerely appreciate the IP threat intelligence data provided by leading providers (No ranking implied, listed in alphabetical order): [AbuseIPDB](https://www.abuseipdb.com/)/[Cloudflare](https://cloudflare.com/)/[DB-IP](https://db-ip.com/)/[IP2Location](https://www.ip2location.io/)/[ipapi](https://ipapi.is/)/[IPinfo](https://ipinfo.io/)/[IPQS](https://www.ipqualityscore.com/)/[ipregistry](https://ipregistry.co/)/[Scamalytics](https://scamalytics.com/) 
-
-- Thanks to [lmc999](https://github.com/lmc999/RegionRestrictionCheck) for parts of this script reference the RegionRestrictionCheck script.
-
-- Thanks to [spiritLHLS](https://github.com/spiritLHLS/ecs) for parts of this script reference the VPS Fusion Monster Server Test Script.
-
-**Server Sponsors​ *(No ranking implied)*:**
-
-| Sponsor | Logo | Link | 
-| - | - | - |
-| V.PS | ![vps_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_vps.png) | [https://v.ps](https://v.ps)| 
-| BAGE | ![bage_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_bage.png) | [https://bagevm.com](https://bagevm.com)|
-| LisaHost</br>丽萨主机 | ![lisa_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_lisa.png) | [https://lisahost.com](https://lisahost.com)|   
-| RapidProxy</br>`ISP IP` | ![rapidproxy_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_rapidproxy.png) | [https://rapidproxy.io](https://www.rapidproxy.io/?ref=gitipquality)|   
-| YINNET</br>蔭雲 | ![yinnet_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_yinnet.png) | [https://yin-net.com](https://yin-net.com)| 
-| Swiftproxy</br>`ISP IP` | ![swiftproxy_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_swiftproxy.png) | [https://swiftproxy.net](https://www.swiftproxy.net/?ref=ipquality)|   
-| IPWO</br>`ISP IP` | ![ipwo_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_ipwo.png) | [https://ipwo.net](https://www.ipwo.net/?ref=githubxykt)|   
-| IPPeak</br>`ISP IP` | ![ippeak_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_ippeak.png) | [https://ippeak.com](https://www.ippeak.com/?utm_t=1&utm_i=125)|  
-| ColaProxy</br>`ISP IP` | ![colaproxy_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_colaproxy.png) | [https://colaproxy.com](https://colaproxy.com/?utm_source=IPQuality&utm_medium=IPQuality&ref=IPQuality)|  
-| VMRack | ![vmrack_logo](https://raw.githubusercontent.com/xykt/IPQuality/main/res/sponsor/logo_vmrack.png) | [https://vmrack.com](https://www.vmrack.net?affid=ipeck)| 
-
-##### *E-Mail: sponsor@check.place Telegram Bot: https://t.me/xythebot*
-**Only accepting merchants with long-term stable operations and good reputation*
-
-**Stars History:**
-
-![Stargazers over time](https://star.xykt.de/xykt/IPQuality.svg?width=1024&height=400&maxRequestPages=20&xTicks=9&yTicks=6&showTitle=false&samplePointRadius=4&lineColor=green&samplePointColor=green&fillColor=green)
-
-**Daily Runs History:**
-
-![daily_runs_history](https://hits.xykt.de/history/ip.svg?days=46&chartType=bar&title=Daily%20Runs%20of%20IP%20Quality%20Script&width=1024&height=400&color=green)
+## Upstream and license
+
+The Bash implementation and compatibility semantics originate from
+**[xykt/IPQuality](https://github.com/xykt/IPQuality)**. This derivative remains
+[AGPL-3.0](LICENSE). Acknowledgments, sponsors and history are retained in the
+[upstream Chinese](docs/upstream/README.md) and [English](docs/upstream/README_EN.md)
+snapshots, with [provenance](docs/upstream/PROVENANCE.md). Linux/macOS users should use upstream.
+
+[Maintenance](windows/MAINTENANCE.md) · [Release procedure](docs/releasing.md)
