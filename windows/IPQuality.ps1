@@ -1,13 +1,24 @@
 #Requires -Version 7.2
 [CmdletBinding()]
 param(
-    [switch]$IPv4,
-    [switch]$IPv6,
-    [string]$Proxy,
-    [string]$Interface,
-    [switch]$FullIP,
-    [switch]$Json,
-    [string]$Output,
+    [Alias('4')][switch]$IPv4,
+    [Alias('6')][switch]$IPv6,
+    [Alias('x')][string]$Proxy,
+    [Alias('i')][string]$Interface,
+    [Alias('f')][switch]$FullIP,
+    [Alias('j')][switch]$Json,
+    [Alias('o')][string]$Output,
+    [Alias('l')][ValidateSet('cn','en','jp','es','de','fr','ru','pt')][string]$Language = 'cn',
+    [Alias('E')][switch]$English,
+    [Alias('p')][switch]$Privacy,
+    [switch]$AllowOnlineReport,
+    [switch]$UpstreamJson,
+    [Alias('h')][switch]$Help,
+    [Alias('M')][switch]$Menu,
+    [switch]$ShowSponsors,
+    [switch]$CountRun,
+    [Alias('n')][switch]$NoDependencyCheck,
+    [Alias('y')][switch]$InstallDependencies,
     [switch]$Force,
     [switch]$Lite,
     [switch]$NoRisk,
@@ -27,6 +38,27 @@ $ErrorActionPreference = 'Stop'
 
 $modulePath = Join-Path $PSScriptRoot 'IPQuality.psm1'
 Import-Module $modulePath -Force
+if ($Help) {
+    Get-Content -LiteralPath (Join-Path $PSScriptRoot 'CLI-HELP.txt')
+    return
+}
+if ($Menu) {
+    & (Join-Path $PSScriptRoot 'Show-IPQualityMenu.ps1')
+    return
+}
+if ($ShowSponsors) {
+    foreach ($file in @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot '../ref') -File | Where-Object Name -Match '^(sponsor|ad[0-9]+)\.ans$' | Sort-Object Name)) {
+        Get-Content -LiteralPath $file.FullName -Raw
+    }
+    return
+}
+if ($Privacy -and $AllowOnlineReport) { throw '-Privacy 与 -AllowOnlineReport 不能同时使用。' }
+if ($English) { $Language = 'en' }
+if ($UpstreamJson) { $Json = $true }
+# -n/-y retain the upstream CLI surface. Platform installation belongs to
+# Install.ps1; PowerShell/curl are the only native runtime dependencies.
+if (-not $NoDependencyCheck) { Get-Command curl.exe -ErrorAction Stop | Out-Null }
+if ($Json) { $InformationPreference = 'SilentlyContinue'; $ProgressPreference = 'SilentlyContinue' }
 $script:IPQSelectedConsoleFontSize = $null
 
 function Set-IPQConsoleLayout {
@@ -171,6 +203,7 @@ try {
         -AddressFamily $families `
         -Proxy $Proxy `
         -Interface $Interface `
+        -Language $Language `
         -FullIP:$FullIP `
         -Lite:$Lite `
         -SkipRisk:$NoRisk `
@@ -178,18 +211,41 @@ try {
         -SkipMail:$NoMail `
         -SkipDnsbl:$NoDnsbl `
         -TimeoutSeconds $TimeoutSeconds `
-        -DnsblConcurrency $DnsblConcurrency)
+        -DnsblConcurrency $DnsblConcurrency -WarningAction $(if ($Json) { 'SilentlyContinue' } else { 'Continue' }) 6>$null)
 
     if ($results.Count -eq 0) {
         throw '没有发现可用的 IPv4 或 IPv6 出口。请检查网络、代理地址或协议选项。'
     }
 
+    if ($AllowOnlineReport) {
+        foreach ($result in $results) {
+            try {
+                $link = Publish-IPQualityReport -Result $result -Proxy $Proxy -Interface $Interface -TimeoutSeconds $TimeoutSeconds
+                $result.Head | Add-Member -NotePropertyName ReportLink -NotePropertyValue $link
+            } catch {
+                $result.Warnings += "Online report: $($_.Exception.Message)"
+                if ($Json) { [Console]::Error.WriteLine($result.Warnings[-1]) } else { Write-Warning $result.Warnings[-1] }
+            }
+        }
+    }
+    if ($CountRun) {
+        foreach ($result in $results) {
+            $counter = & (Get-Module IPQuality) {
+                param($family,$proxy,$interface,$timeout)
+                $context = New-IPQContext -AddressFamily $family -Proxy $proxy -Interface $interface -TimeoutSeconds $timeout
+                $response = Invoke-IPQRequest -Context $context -Uri 'https://hits.xykt.de/ip?action=hit'
+                ConvertFrom-IPQJson $response.Body
+            } $(if ($result.Head.AddressFamily -eq 'IPv6') { 6 } else { 4 }) $Proxy $Interface $TimeoutSeconds
+            $result.Head | Add-Member RunCounter $counter
+        }
+    }
+    $outputResults = if ($UpstreamJson) { @($results | ForEach-Object { ConvertTo-IPQualityUpstreamReport $_ }) } else { $results }
     if ($Json) {
-        $rendered = if ($results.Count -eq 1) {
-            $results[0] | ConvertTo-Json -Depth 12
+        $rendered = if (@($outputResults).Count -eq 1) {
+            @($outputResults)[0] | ConvertTo-Json -Depth 16
         }
         else {
-            $results | ConvertTo-Json -Depth 12
+            $outputResults | ConvertTo-Json -Depth 16
         }
         $rendered
     }
@@ -210,7 +266,14 @@ try {
     }
 
     if ($Output) {
-        Export-IPQualityReport -Result $results -Path $Output -Force:$Force
+        if ($UpstreamJson -and [IO.Path]::GetExtension($Output) -ieq '.json') {
+            $target = [IO.Path]::GetFullPath($Output)
+            if ((Test-Path -LiteralPath $target) -and -not $Force) { throw "文件已存在：$target" }
+            [IO.Directory]::CreateDirectory((Split-Path -Parent $target)) | Out-Null
+            [IO.File]::WriteAllText($target, $rendered, [Text.UTF8Encoding]::new($false))
+        } else {
+            Export-IPQualityReport -Result $results -Path $Output -Force:$Force
+        }
         if ($Host.Name -eq 'ConsoleHost' -and -not [Console]::IsOutputRedirected) {
             try {
                 $Host.UI.RawUI.WindowTitle = if ($Lite) {

@@ -4,6 +4,12 @@ This is the Windows product branch of `xykt/IPQuality`, under AGPL-3.0.
 Read `windows/MAINTENANCE.md` before changing runtime behavior.
 
 - Preserve upstream authorship, license and the reviewed compatibility baseline.
+- Keep feature parity with the current official xykt/IPQuality source. Only
+  Windows platform integration is implemented separately; retain all other
+  capabilities, options, detection sources, decision rules and reference data.
+  Do not silently reduce scope. Record a source-backed feature map and explicit
+  unresolved differences; matching the fork HEAD or updating a bundled script
+  alone does not prove parity. User-confirmed requirement: 2026-10-13.
 - Root READMEs explain the Windows distribution. Preserve upstream README
   snapshots in `docs/upstream/` and their provenance when syncing.
 - Runtime changes need the offline suite and relevant boundary tests. CI is not

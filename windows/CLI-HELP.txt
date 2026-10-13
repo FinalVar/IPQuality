@@ -1,0 +1,29 @@
+IPQuality Windows — official xykt/IPQuality feature mapping
+
+ipq                              当前代理节点，IPv4，保存本地 JSON
+ipq -6                           当前代理节点，IPv6
+ipq -Direct [-i <本机IP或接口>]   显式本机直连
+ipq -x <http/socks代理URL>        显式代理
+ipq -DualStack -j                双栈自动化 JSON
+ipq -f                           显示完整出口 IP
+ipq -l cn|en|jp|es|de|fr|ru|pt   基础信息语言（非中文使用英文标签）
+ipq -E                           英文快捷选项
+ipq -j                           原生详细 JSON，包含来源、错误和判定证据
+ipq -UpstreamJson                官方七部分 JSON 结构
+ipq -o <文件.ansi|.json|.txt>     彩色 ANSI、JSON 或纯文本导出
+ipq -Force                       允许覆盖指定输出文件
+ipq -p                           隐私模式（默认启用：不上传整份报告）
+ipq -AllowOnlineReport            显式上传报告至官方 Check.Place，返回分享链接
+ipq -M                           本地交互菜单
+ipq -ShowSponsors                查看随官方快照同步的作者/赞助内容
+ipq -CountRun                    显式调用官方运行计数服务，计数保存在 JSON Head
+ipq -h                           帮助
+ipq -n / -y                      官方依赖检查选项；Windows 依赖由安装器处理
+ipq -Lite                        精简数据源模式；MaxMind 失败时自动 IPinfo 回退
+ipq -NoRisk -NoMedia -NoMail -NoDnsbl  按需跳过检测
+ipq -NoSave                      不保存本地报告
+
+界面默认：Consolas 18，74×47；小屏向下适配。双栈仅用于自动化输出。
+代理不会自动退回直连。SMTP 25 端口不经过代理；DNSBL 仅支持 IPv4。
+外部检测服务会看到出口 IP。在线分享仅在指定 -AllowOnlineReport 时启用。
+-FullIP 与在线分享同时使用时，官方分享服务会收到完整 IP。

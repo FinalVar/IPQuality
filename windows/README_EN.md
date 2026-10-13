@@ -21,14 +21,14 @@ Requirements:
 - the Windows-provided `curl.exe`.
 
 Download `latest.zip` from the
-[versioned release](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.7.1-preview.1),
+[versioned release](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.8.0-preview.1),
 compare its SHA-256 with `latest.sha256`, extract, then double-click:
 
 ```text
 Install.cmd
 ```
 
-This is the 0.7.1 public preview. See the
+This is the 0.8.0 public preview. See the
 [verification scope](../docs/verification-latest.md). The
 [`windows-native` ZIP](https://github.com/FinalVar/IPQuality/archive/refs/heads/windows-native.zip)
 is a moving development snapshot, not a fixed release.
@@ -128,8 +128,8 @@ point is:
 - TikTok, Disney+, Netflix, YouTube Premium, Amazon Prime Video, Reddit, and
   ChatGPT status, region, and native/DNS unlock type;
 - TCP port 25 connectivity for 12 mail providers;
-- 439 unique DNSBL zones from the bundled upstream list;
-- colored console, JSON, and plain-text reports.
+- 423 unique DNSBL zones from the bundled upstream list;
+- Chinese/English colored console, JSON, ANSI, and plain-text reports.
 
 `-Lite` retains four reputation sources—IPinfo, ipregistry, ipapi, and DB-IP.
 It does not automatically skip media, mail, or DNSBL checks.
@@ -170,7 +170,7 @@ JSON `Head` distinguishes:
 By default, reports do not retain the complete egress IP, proxy URI, `ss://`
 URI, or password. `-FullIP` deliberately includes the full address.
 
-The assembled report is not uploaded as a document. Network checks still send
+Assembled reports are uploaded only with explicit -AllowOnlineReport. Network checks still send
 requests from the tested egress to the named data and media services, so those
 services can observe that IP. DNSBL query names are visible to the configured
 local DNS resolver.
@@ -241,3 +241,27 @@ This Windows implementation is derived from `xykt/IPQuality` and remains under
 the repository's AGPL-3.0 license. The visible report identifies the current
 `FinalVar/IPQuality` implementation while JSON and maintenance records preserve
 the upstream attribution.
+
+## 0.8.0 upstream synchronization
+
+The reviewed upstream is `87397e2c3196ec796f5477c83343c2354df601ea`, script
+`v2026-09-16`. See the [feature map and boundaries](../docs/upstream-sync/latest.md).
+Use `-English/-E`, or `-Language/-l cn|en|jp|es|de|fr|ru|pt` for basic information.
+Non-cn report labels are English. `-Output latest.ansi` preserves colors;
+`.json` and other extensions select JSON and plain text. `-Json/-j` emits JSON
+only; `-UpstreamJson` maps the official seven sections with native null/numbers.
+
+Online sharing is available with explicit `-AllowOnlineReport`; the official
+report URL is saved in native JSON and shown on the report's last line.
+`-Privacy/-p` is the default and conflicts with explicit sharing. `-Menu/-M`
+opens a native IPQuality menu. `-ShowSponsors` displays upstream sponsor assets;
+`-CountRun` explicitly enables upstream usage counting and saves Head.RunCounter.
+`-Help/-h` needs no network. Linux dependency flags `-n/-y` are accepted; Windows
+installation and built-in curl provide the native dependencies.
+
+The launcher accepts `-Interface/-i` together with `-Direct`; Windows aliases
+are resolved to local addresses. `-DualStack -Json` enables automated dual-stack
+output. The .cmd entry accepts official short numeric options; direct PowerShell
+script calls should use `-IPv4/-IPv6` rather than negative-number tokens.
+MaxMind failure automatically selects the official IPinfo Lite fallback.
+The existing Consolas 18, 74×47 display contract remains unchanged.

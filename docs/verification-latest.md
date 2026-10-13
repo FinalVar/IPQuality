@@ -1,28 +1,36 @@
-# Windows 0.7.1 preview verification scope
+# Windows 0.8.0 preview verification scope
 
-This preview packages the existing Windows implementation with improved entry
-pages, an offline demonstration and reproducible release tooling. Detection and
-routing algorithms are unchanged from `6e7d3a572617cfd5c336dbf7720acf7e0a4fee08`;
-the runtime version is updated to 0.7.1.
+Reviewed on 2026-10-13 against official xykt/IPQuality commit
+`87397e2c3196ec796f5477c83343c2354df601ea`, script `v2026-09-16`.
+See [capability mapping and differences](upstream-sync/latest.md).
 
-## Local evidence on 2026-10-10
+## Local evidence
 
-- The existing offline smoke suite passed on the maintainer's Windows machine.
-- Real IPv4 discovery and base-information requests returned one masked report,
-  available base information and an ASN. Risk, media, SMTP and DNSBL were skipped.
-- The demo uses synthetic data and the existing renderer. It sends no network
-  requests and is not evidence of live service availability.
+- Offline parser, installer, upgrade, uninstall and Windows PowerShell 5.1
+  bootstrap suite; byte-based UTF-8 decoding under code pages 936 and 65001.
+- New upstream endpoint/rule fixtures: ipapi, DB-IP two-stage request, Amazon,
+  Reddit/IPv6 fallback, TikTok region, DNS and 423-zone data integrity.
+- Locale fallback, automatic IPinfo Lite, official JSON field mapping, ANSI/plain
+  exports and upload-contract tests. Sharing tests did not upload real reports.
+- Full-data report rendering has 46 rows and fits 74 columns in Chinese and English.
+- Real current-proxy IPv4 full run: 8/9 risk sources returned data; ipapi and
+  ipregistry now available. DB-IP, Disney+ and Netflix had TLS failures; TikTok
+  timed out. YouTube, Amazon, Reddit and ChatGPT returned results.
+- DNSBL queried 423 zones: 1 clean, 422 marked, 0 blacklisted, 1 error; marked
+  answers used local FakeIP addresses. This is not evidence of real DNSBL listings.
+- Chinese and English live basic-information requests returned valid masked JSON;
+  the Chinese country/continent values were intact (香港 / 亚洲).
 
-The release commit must also pass offline regression and archive installation in
-CI before publication. See the linked run on the release.
+## Required package and CI gate
 
-## Unverified for this preview
+The exact release commit must pass the full offline suite and source archive
+installation verification locally and on Windows GitHub Actions before publishing
+its preview. Release metadata records the source commit and hashes. Current
+runtime availability is distinct from the source compatibility baseline.
 
-This launch does not claim new physical desktop acceptance, all Windows
-versions, native ARM64, live IPv6, all risk/media endpoints, SMTP delivery,
-DNSBL accuracy, or a fresh same-exit comparison with upstream. No stable release
-is claimed. These checks remain in the stable-release matrix.
+## Validation boundaries
 
-The reviewed compatibility snapshot remains dated 2026-07-24. Matching hashes
-attest to that saved baseline, not to today's remote service behavior or the
-current upstream HEAD.
+Not revalidated: physical desktop display, all Windows versions, native ARM64,
+IPv6 end-to-end, direct SMTP on a public NIC, playback/login, public online-report
+rendering and a simultaneous same-exit Bash/native run. No stable-release or
+universal service-availability claim is made.

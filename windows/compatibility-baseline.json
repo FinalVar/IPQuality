@@ -2,9 +2,11 @@
   "SchemaVersion": 1,
   "Repository": "https://github.com/xykt/IPQuality",
   "Branch": "main",
-  "ScriptVersion": "v2026-03-29",
-  "ScriptSha256": "69e7a8d0b9018a508fa7a54a3f7e98c9fa8c19eeb6995d60675070361cb76c03",
-  "WindowsVersion": "0.7.1",
-  "DnsblUniqueZones": 439,
-  "ReviewedDate": "2026-07-24"
+  "UpstreamCommit": "87397e2c3196ec796f5477c83343c2354df601ea",
+  "ScriptVersion": "v2026-09-16",
+  "ScriptSha256": "b30df5a3c2204276c54e99dcc5080b46f8a627667730aee7de63b109b8ecaecf",
+  "WindowsVersion": "0.8.0",
+  "DnsblUniqueZones": 423,
+  "DnsblSha256": "a92ca482843310167309c82f05cb7e208d7decc7f8bb7eada0f96af42f1143ad",
+  "ReviewedDate": "2026-10-13"
 }

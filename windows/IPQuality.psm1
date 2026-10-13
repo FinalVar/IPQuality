@@ -1,7 +1,7 @@
 #Requires -Version 7.2
 Set-StrictMode -Version Latest
 
-$script:IPQualityVersion = '0.7.1'
+$script:IPQualityVersion = '0.8.0'
 $script:UpstreamVersion = 'unknown'
 $script:RepositoryUrl = 'https://github.com/FinalVar/IPQuality'
 $script:UpstreamRepositoryUrl = 'https://github.com/xykt/IPQuality'
@@ -94,7 +94,8 @@ try {
         "$($reviewedBaseline.WindowsVersion)" -eq
             $script:IPQualityVersion -and
         [int]$reviewedBaseline.DnsblUniqueZones -eq
-            $dnsblUniqueZones
+            $dnsblUniqueZones -and
+        $reviewedBaseline.DnsblSha256 -eq (Get-FileHash -LiteralPath $dnsblPath -Algorithm SHA256).Hash
     )
 }
 catch {
@@ -252,6 +253,7 @@ function New-IPQContext {
         [ValidateSet(4, 6)][int]$AddressFamily,
         [AllowEmptyString()][string]$Proxy,
         [AllowEmptyString()][string]$Interface,
+        [ValidateSet('cn','en','jp','es','de','fr','ru','pt')][string]$Language = 'cn',
         [ValidateRange(2, 60)][int]$TimeoutSeconds = 10
     )
 
@@ -265,10 +267,25 @@ function New-IPQContext {
         }
     }
 
+    if ($Interface) {
+        $sourceAddress = $null
+        if (-not [Net.IPAddress]::TryParse($Interface, [ref]$sourceAddress)) {
+            # Windows curl cannot bind by interface name. Resolve it to an
+            # address of the requested family, retaining explicit source binding.
+            $familyName = if ($AddressFamily -eq 6) { 'IPv6' } else { 'IPv4' }
+            $candidates = @(Get-NetIPAddress -InterfaceAlias $Interface -AddressFamily $familyName -ErrorAction Stop |
+                Where-Object { $_.AddressState -eq 'Preferred' -and -not $_.SkipAsSource } |
+                Sort-Object IPAddress)
+            if ($candidates.Count -eq 0) { throw '指定接口没有可用于该地址族的本机地址。' }
+            $Interface = $candidates[0].IPAddress
+        }
+    }
+
     [pscustomobject]@{
         AddressFamily = $AddressFamily
         Proxy = $Proxy
         Interface = $Interface
+        Language = $Language
         TimeoutSeconds = $TimeoutSeconds
         CurlPath = Get-IPQCurlPath
         RouteType = if ($Proxy) { 'Proxy' } else { 'Direct' }
@@ -285,6 +302,9 @@ function Invoke-IPQRequest {
         [AllowNull()][string]$Body,
         [AllowEmptyString()][string]$ContentType,
         [AllowEmptyString()][string]$Cookie,
+        [Collections.IDictionary]$Form,
+        [Collections.IDictionary]$FormFiles,
+        [string[]]$Resolve,
         [switch]$NoRedirect,
         [switch]$FailOnHttpError,
         [switch]$Tls13,
@@ -348,6 +368,22 @@ function Invoke-IPQRequest {
         $arguments.Add('--data-raw')
         $arguments.Add($Body)
     }
+    if ($Form) {
+        foreach ($entry in $Form.GetEnumerator()) {
+            $arguments.Add('--data-urlencode')
+            $arguments.Add("$($entry.Key)=$($entry.Value)")
+        }
+    }
+    if ($FormFiles) {
+        foreach ($entry in $FormFiles.GetEnumerator()) {
+            $arguments.Add('--data-urlencode')
+            $arguments.Add("$($entry.Key)@$($entry.Value)")
+        }
+    }
+    foreach ($mapping in $Resolve) {
+        $arguments.Add('--resolve')
+        $arguments.Add($mapping)
+    }
     if ($DiscardBody) {
         $arguments.Add('--output')
         $arguments.Add('NUL')
@@ -365,6 +401,9 @@ function Invoke-IPQRequest {
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
+    # curl emits response bytes unchanged. These JSON/HTML endpoints use UTF-8;
+    # inheriting the console code page corrupts names in a GBK Windows console.
+    $startInfo.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
     foreach ($argument in $arguments) {
         [void]$startInfo.ArgumentList.Add($argument)
     }
@@ -727,17 +766,18 @@ function Get-IPQMaxMindInfo {
         [Parameter(Mandatory)][string]$Address
     )
 
-    $response = Invoke-IPQRequest -Context $Context -Uri "https://ipinfo.check.place/${Address}?lang=cn"
+    $language = Get-IPQValue $Context 'Language' 'cn'
+    $response = Invoke-IPQRequest -Context $Context -Uri "https://ipinfo.check.place/${Address}?lang=$language"
     $data = ConvertFrom-IPQJson $response.Body
     $fallbackResponse = $null
     $fallbackData = $null
-    if ($null -eq $data) {
+    if ($language -ne 'en') {
         $fallbackResponse = Invoke-IPQRequest -Context $Context -Uri "https://ipinfo.check.place/${Address}?lang=en"
         $fallbackData = ConvertFrom-IPQJson $fallbackResponse.Body
     }
     else {
-        $fallbackResponse = Invoke-IPQRequest -Context $Context -Uri "https://ipinfo.check.place/${Address}?lang=en"
-        $fallbackData = ConvertFrom-IPQJson $fallbackResponse.Body
+        $fallbackResponse = $response
+        $fallbackData = $data
     }
 
     if ($null -eq $data -and $null -eq $fallbackData) {
@@ -803,7 +843,7 @@ function Get-IPQSourceIPInfo {
         return New-IPQSourceResult -Name 'IPinfo' -Available $false -Error $(if ($response.Error) { $response.Error } else { '无有效 JSON' })
     }
 
-    New-IPQSourceResult `
+    $result = New-IPQSourceResult `
         -Name 'IPinfo' `
         -Available $true `
         -CountryCode "$(Get-IPQValue $data 'data.country' '')" `
@@ -816,6 +856,8 @@ function Get-IPQSourceIPInfo {
             -Vpn (Get-IPQValue $data 'data.privacy.vpn') `
             -Server (Get-IPQValue $data 'data.privacy.hosting')) `
         -Error ''
+    $result | Add-Member -NotePropertyName BasicInfo -NotePropertyValue (ConvertFrom-IPQIPInfoBasic -Data $data)
+    return $result
 }
 
 function Get-IPQSourceScamalytics {
@@ -890,7 +932,7 @@ function Get-IPQSourceIPRegistry {
 function Get-IPQSourceIPApi {
     param([object]$Context, [string]$Address)
 
-    $response = Invoke-IPQRequest -Context $Context -Uri "https://api.ipapi.is/?q=$Address"
+    $response = Invoke-IPQRequest -Context $Context -Uri "https://ipinfo.check.place/${Address}?db=ipapi"
     $data = ConvertFrom-IPQJson $response.Body
     if ($null -eq $data -or (Get-IPQValue $data 'error')) {
         return New-IPQSourceResult -Name 'ipapi' -Available $false -Error $(if ($response.Error) { $response.Error } else { "$(Get-IPQValue $data 'message' '无有效 JSON')" })
@@ -1075,19 +1117,44 @@ function ConvertFrom-IPQDbIpPage {
 function Get-IPQSourceDBIP {
     param([object]$Context, [string]$Address)
 
-    $response = Invoke-IPQRequest -Context $Context -Uri "https://db-ip.com/$Address"
-    $parsed = ConvertFrom-IPQDbIpPage -Body $response.Body
-    if (-not $response.Success -or $null -eq $parsed) {
-        return New-IPQSourceResult -Name 'DB-IP' -Available $false -Error $(if ($response.Error) { $response.Error } else { '页面内容为空' })
+    # Match upstream's current two-stage API, retaining the explicit route.
+    $headers = [ordered]@{
+        'accept' = '*/*'
+        'accept-language' = 'en-US,en;q=0.9'
+        'content-type' = 'text/html;charset=UTF-8'
+        'dnt' = '1'
+        'user-agent' = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36'
     }
+    $page = Invoke-IPQRequest -Context $Context -Uri 'https://db-ip.com/api/core/' -Headers $headers
+    if (-not $page.Success -or $page.Body -notmatch 'data-api-key=["''](?<key>[A-Za-z0-9_-]+)["'']') {
+        return New-IPQSourceResult -Name 'DB-IP' -Available $false -Error $(if ($page.Error) { $page.Error } else { 'DB-IP 未返回公开演示 API 标识' })
+    }
+    $demoKey = $Matches.key
+    $headers['content-type'] = 'text/plain;charset=UTF-8'
+    $headers['origin'] = 'https://db-ip.com'
+    $headers['referer'] = 'https://db-ip.com/'
+    $headers['priority'] = 'u=1, i'
+    $headers['sec-ch-ua'] = '"Not=A?Brand";v="99", "Google Chrome";v="151", "Chromium";v="151"'
+    $headers['sec-ch-ua-mobile'] = '?0'
+    $headers['sec-ch-ua-platform'] = '"Windows"'
+    $headers['sec-fetch-dest'] = 'empty'
+    $headers['sec-fetch-mode'] = 'cors'
+    $headers['sec-fetch-site'] = 'same-site'
+    $response = Invoke-IPQRequest -Context $Context -Uri "https://api.db-ip.com/v2/$demoKey/self?convertCurrencies" -Method POST -Headers $headers -Body '[["11.49","EUR"],["139.90","EUR"],["699.90","EUR"]]'
+    $data = ConvertFrom-IPQJson $response.Body
+    if (-not $response.Success -or $null -eq $data -or -not (Get-IPQValue $data 'countryCode')) {
+        return New-IPQSourceResult -Name 'DB-IP' -Available $false -Error 'DB-IP 演示 API 未返回有效地区数据'
+    }
+    $risk = "$(Get-IPQValue $data 'threatLevel' '')"
+    $score = switch ($risk.ToLowerInvariant()) { 'low' { 0 } 'medium' { 50 } 'high' { 100 } default { $null } }
 
     New-IPQSourceResult `
         -Name 'DB-IP' `
         -Available $true `
-        -CountryCode $parsed.CountryCode `
-        -Score $parsed.Score `
-        -RiskLevel (Get-IPQRiskLevel -SourceName 'DB-IP' -Score $parsed.Score -Hint $parsed.RiskText) `
-        -Flags $parsed.Flags `
+        -CountryCode "$(Get-IPQValue $data 'countryCode' '')" `
+        -Score $score `
+        -RiskLevel (Get-IPQRiskLevel -SourceName 'DB-IP' -Score $score -Hint $risk) `
+        -Flags (New-IPQFlags -Proxy (Get-IPQValue $data 'isProxy') -Robot (Get-IPQValue $data 'isCrawler')) `
         -Error ''
 }
 
@@ -1307,13 +1374,13 @@ function Get-IPQDnsServerAddresses {
 function Test-IPQUpstreamDnsAddress {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$ResolvedAddress,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ResolvedAddress,
         [AllowEmptyString()][string]$DnsServer = ''
     )
 
     $resolved = $null
     if (-not [Net.IPAddress]::TryParse($ResolvedAddress, [ref]$resolved)) {
-        return $false
+        return $true
     }
     if ($resolved.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork) {
         $bytes = $resolved.GetAddressBytes()
@@ -1371,6 +1438,7 @@ function Invoke-IPQDnsCompatibilityProbe {
     $recordType = if ($AddressFamily -eq 4) { 'A' } else { 'AAAA' }
     $answerRecords = @()
     $addresses = @()
+    $answerCountKnown = $true
     try {
         $answerRecords = @(
             Resolve-DnsName -Name $Domain -Type $recordType -DnsOnly -ErrorAction Stop |
@@ -1388,6 +1456,7 @@ function Invoke-IPQDnsCompatibilityProbe {
     }
     catch {
         $addresses = @()
+        $answerCountKnown = Test-IPQExpectedEmptyDnsErrorId $_.FullyQualifiedErrorId
     }
 
     $dnsServer = @(Get-IPQDnsServerAddresses -AddressFamily $AddressFamily | Select-Object -First 1)
@@ -1397,14 +1466,15 @@ function Invoke-IPQDnsCompatibilityProbe {
             -DnsServer $(if ($dnsServer.Count -gt 0) { $dnsServer[0] } else { '' })
     }
     else {
-        $false
+        # Upstream 2026-09-16: missing/failed DNS address is not a DNS-unlock signal.
+        $true
     }
     $checks = [Collections.Generic.List[bool]]::new()
     $checks.Add($check1)
 
     if ($IncludeAnswerCount) {
         # Mirrors upstream Check_DNS_2: zero, one or two answers are classified as DNS.
-        $checks.Add($answerRecords.Count -gt 2)
+        $checks.Add(-not $answerCountKnown -or $answerRecords.Count -gt 2)
     }
     if ($IncludeWildcard) {
         $wildcardCount = 0
@@ -1472,6 +1542,13 @@ function Get-IPQMediaUnlockType {
     return [pscustomobject]@{ Type = $type; Evidence = $evidence }
 }
 
+function Get-IPQTikTokRegion {
+    param([AllowEmptyString()][string]$Body)
+    $regions = [regex]::Matches($Body, '"region"\s*:\s*"(?<region>[^"]+)"')
+    if ($regions.Count) { return $regions[-1].Groups['region'].Value }
+    return ''
+}
+
 function Test-IPQTikTok {
     param([object]$Context)
 
@@ -1485,7 +1562,7 @@ function Test-IPQTikTok {
             -Uri 'https://www.tiktok.com/explore' `
             -Headers ([ordered]@{ 'User-Agent' = $script:UserAgent })
     }
-    $region = Get-IPQRegionFromText $response.Body
+    $region = Get-IPQTikTokRegion $response.Body
     if ($region) {
         return New-IPQMediaResult -Name 'TikTok' -Status 'Available' -Region $region -Context $Context -Evidence '页面返回地区字段'
     }
@@ -1500,7 +1577,7 @@ function Test-IPQTikTok {
         -Context $Context `
         -Uri $(if ($response.Body -match 'Please wait\.\.\.') { 'https://www.tiktok.com/explore' } else { 'https://www.tiktok.com/' }) `
         -Headers $fallbackHeaders
-    $fallbackRegion = Get-IPQRegionFromText $fallback.Body
+    $fallbackRegion = Get-IPQTikTokRegion $fallback.Body
     if ($fallbackRegion) {
         return New-IPQMediaResult `
             -Name 'TikTok' `
@@ -1510,27 +1587,9 @@ function Test-IPQTikTok {
             -Evidence '官方兼容性第二次页面检测仅识别到 IDC 结果'
     }
 
-    # The upstream fallback is sensitive to the rotating TikTok edge page.
-    # One retry against /explore avoids converting a transient empty page into
-    # a false block while preserving the same region-based decision rule.
-    $retry = Invoke-IPQRequest `
-        -Context $Context `
-        -Uri 'https://www.tiktok.com/explore' `
-        -Headers $fallbackHeaders
-    $retryRegion = Get-IPQRegionFromText $retry.Body
-    if ($retryRegion) {
-        return New-IPQMediaResult `
-            -Name 'TikTok' `
-            -Status 'IDCOnly' `
-            -Region $retryRegion `
-            -Context $Context `
-            -Evidence '官方兼容性页面重试识别到 IDC 结果'
-    }
-
     $requestErrors = @(
         $response.Error,
-        $fallback.Error,
-        $retry.Error
+        $fallback.Error
     ) | Where-Object { $_ }
     return New-IPQMediaResult `
         -Name 'TikTok' `
@@ -1731,7 +1790,7 @@ function Test-IPQPrimeVideo {
     if (-not $response.Success) {
         return New-IPQMediaResult -Name 'AmazonPrimeVideo' -Status 'Error' -Context $Context -Error $response.Error
     }
-    $region = Get-IPQRegionFromText $response.Body
+    $region = if ($response.Body -match '"currentTerritory"\s*:\s*"(?<region>[A-Z]{2})"') { $Matches.region } else { '' }
     if ($region) {
         return New-IPQMediaResult -Name 'AmazonPrimeVideo' -Status 'Available' -Region $region -Context $Context -Evidence 'currentTerritory'
     }
@@ -1745,12 +1804,28 @@ function Test-IPQReddit {
     param([object]$Context)
 
     $headers = [ordered]@{ 'User-Agent' = $script:UserAgent }
+    $resolve = @()
+    if ($Context.AddressFamily -eq 6) {
+        $address = $null
+        foreach ($domain in @('reddit.com', 'dualstack.reddit.map.fastly.net')) {
+            try {
+                $address = Resolve-DnsName -Name $domain -Type AAAA -DnsOnly -ErrorAction Stop |
+                    Where-Object { $_.QueryType -eq 'AAAA' } | Select-Object -First 1 -ExpandProperty IPAddress
+            } catch { $address = $null }
+            if ($address) { break }
+        }
+        if (-not $address) {
+            return New-IPQMediaResult -Name 'Reddit' -Status 'Error' -Context $Context -Error 'Reddit IPv6 DNS 无可用地址'
+        }
+        $resolve = @("www.reddit.com:443:[$address]")
+    }
     $response = Invoke-IPQRequest `
         -Context $Context `
-        -Uri 'https://www.reddit.com/' `
+        -Uri 'https://www.reddit.com/svc/shreddit/reddit-chat' `
         -Headers $headers `
+        -Resolve $resolve `
         -FailOnHttpError
-    $region = Get-IPQRegionFromText $response.Body
+    $region = if ($response.Body -match 'country="(?<region>[^"]+)"') { $Matches.region } else { '' }
     switch ($response.StatusCode) {
         200 { return New-IPQMediaResult -Name 'Reddit' -Status 'Available' -Region $region -Context $Context -Evidence 'HTTP 200' }
         403 { return New-IPQMediaResult -Name 'Reddit' -Status 'Blocked' -Context $Context -Evidence 'HTTP 403' }
@@ -2303,6 +2378,14 @@ function Test-IPQExpectedEmptyDnsErrorId {
     )
 }
 
+function Get-IPQDnsblAnswerStatus {
+    param([AllowEmptyCollection()][string[]]$Answers = @())
+    if ($Answers.Count -gt 0 -and $Answers[0] -match '^127\.255\.255\.') { return 'Clean' }
+    if ($Answers.Count -eq 1 -and $Answers[0] -eq '127.0.0.2') { return 'Blacklisted' }
+    if ($Answers.Count -gt 0) { return 'Marked' }
+    return 'Clean'
+}
+
 function Get-IPQDnsblChecks {
     [CmdletBinding()]
     param(
@@ -2333,6 +2416,7 @@ function Get-IPQDnsblChecks {
             Sort-Object -Unique
     )
     $reversed = ($Address.Split('.')[3..0] -join '.')
+    $classifyAnswers = ${function:Get-IPQDnsblAnswerStatus}.ToString()
     Write-Progress -Activity '查询 DNS 黑名单' -Status "$($zones.Count) 个 DNSBL" -PercentComplete 10
     $checks = @(
         $zones | ForEach-Object -Parallel {
@@ -2354,15 +2438,8 @@ function Get-IPQDnsblChecks {
                         ForEach-Object IPAddress |
                         Where-Object { $_ }
                 )
-                if ($answers.Count -eq 1 -and $answers[0] -eq '127.0.0.2') {
-                    [pscustomobject]@{ Zone = $zone; Status = 'Blacklisted'; Answers = $answers; HadError = $false; Error = '' }
-                }
-                elseif ($answers.Count -gt 0) {
-                    [pscustomobject]@{ Zone = $zone; Status = 'Marked'; Answers = $answers; HadError = $false; Error = '' }
-                }
-                else {
-                    [pscustomobject]@{ Zone = $zone; Status = 'Clean'; Answers = @(); HadError = $false; Error = '' }
-                }
+                $status = & ([scriptblock]::Create($using:classifyAnswers)) -Answers $answers
+                [pscustomobject]@{ Zone = $zone; Status = $status; Answers = $answers; HadError = $false; Error = '' }
             }
             catch {
                 # ForEach-Object -Parallel runs in an isolated runspace, so keep
@@ -2400,6 +2477,7 @@ function Invoke-IPQualityCheck {
         [ValidateSet(4, 6)][int[]]$AddressFamily = @(4, 6),
         [AllowEmptyString()][string]$Proxy,
         [AllowEmptyString()][string]$Interface,
+        [ValidateSet('cn','en','jp','es','de','fr','ru','pt')][string]$Language = 'cn',
         [switch]$FullIP,
         [switch]$Lite,
         [switch]$SkipRisk,
@@ -2416,6 +2494,7 @@ function Invoke-IPQualityCheck {
             -AddressFamily $family `
             -Proxy $Proxy `
             -Interface $Interface `
+            -Language $Language `
             -TimeoutSeconds $TimeoutSeconds
         Write-Host "`n正在发现 IPv$family 出口（$($context.RouteType)）..." -ForegroundColor Cyan
         $public = Get-IPQPublicAddress -Context $context
@@ -2430,10 +2509,13 @@ function Invoke-IPQualityCheck {
 
         Write-Host '正在查询基础地理与 ASN 信息...' -ForegroundColor DarkCyan
         $maxMind = Get-IPQMaxMindInfo -Context $context -Address $address
+        $maxMindError = if ($maxMind.Available) { '' } else { $maxMind.Error }
+        $automaticLite = -not $maxMind.Available
+        $basicSourceName = 'MaxMind'
 
         $sources = @()
         if (-not $SkipRisk) {
-            if ($Lite) {
+            if ($Lite -or $automaticLite) {
                 $sources = @(
                     Get-IPQSourceIPInfo -Context $context -Address $address
                     Get-IPQSourceIPRegistry -Context $context -Address $address
@@ -2443,6 +2525,14 @@ function Invoke-IPQualityCheck {
             }
             else {
                 $sources = @(Get-IPQRiskSources -Context $context -Address $address)
+            }
+        }
+        if ($automaticLite) {
+            $fallback = $sources | Where-Object Name -eq 'IPinfo' | Select-Object -First 1
+            if ($null -eq $fallback) { $fallback = Get-IPQSourceIPInfo -Context $context -Address $address }
+            if ($fallback.Available -and $null -ne (Get-IPQValue $fallback 'BasicInfo')) {
+                $maxMind = $fallback.BasicInfo
+                $basicSourceName = 'IPinfo'
             }
         }
         $consensus = Get-IPQConsensus -Sources $sources
@@ -2477,8 +2567,8 @@ function Invoke-IPQualityCheck {
         }
 
         $warnings = [Collections.Generic.List[string]]::new()
-        if (-not $maxMind.Available) {
-            $warnings.Add("MaxMind：$($maxMind.Error)")
+        if ($maxMindError) {
+            $warnings.Add("MaxMind：$maxMindError；已尝试官方 IPinfo Lite 回退")
         }
         foreach ($source in ($sources | Where-Object { -not $_.Available })) {
             $warnings.Add("$($source.Name)：$($source.Error)")
@@ -2517,6 +2607,7 @@ function Invoke-IPQualityCheck {
         $registeredCountryCode = Get-IPQValue $maxMind 'RegisteredCountryCode'
         $info = [pscustomobject][ordered]@{
             SourceAvailable = $maxMind.Available
+            Source = $basicSourceName
             SourceError = Get-IPQValue $maxMind 'Error'
             ASN = Get-IPQValue $maxMind 'ASN'
             Organization = Get-IPQValue $maxMind 'Organization'
@@ -2538,7 +2629,8 @@ function Invoke-IPQualityCheck {
             Map = Get-IPQMapUrl `
                 -Latitude $latitude `
                 -Longitude $longitude `
-                -AccuracyRadius $accuracyRadius
+                -AccuracyRadius $accuracyRadius `
+                -Language $Language
             GeoType = if (
                 $countryCode -and
                 $registeredCountryCode -and
@@ -2555,10 +2647,12 @@ function Invoke-IPQualityCheck {
         }
         $reportTimes = Get-IPQReportTimes
 
-        $allResults.Add([pscustomobject][ordered]@{
+        $report = [pscustomobject][ordered]@{
             Head = [pscustomobject][ordered]@{
                 Tool = 'IPQuality for Windows'
                 Version = $script:IPQualityVersion
+                Language = $Language
+                Lite = [bool]($Lite -or $automaticLite)
                 UpstreamVersion = $script:UpstreamVersion
                 Repository = $script:RepositoryUrl
                 Upstream = $script:UpstreamRepositoryUrl
@@ -2587,7 +2681,9 @@ function Invoke-IPQualityCheck {
             Mail = $mail
             DNSBlacklist = $dnsbl
             Warnings = $warnings.ToArray()
-        })
+        }
+        if (-not $FullIP) { Protect-IPQReportFields -Value $report -Address $address }
+        $allResults.Add($report)
     }
     return $allResults.ToArray()
 }
@@ -2641,6 +2737,10 @@ function ConvertTo-IPQPort25StatusLabel {
 function Get-IPQualityReportText {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$Result)
+
+    if ((Get-IPQValue $Result.Head 'Language' 'cn') -ne 'cn') {
+        return (Get-IPQualityReportAnsi -Result $Result) -replace '\x1b\[[0-9;]*m', ''
+    }
 
     $builder = [Text.StringBuilder]::new()
     [void]$builder.AppendLine('########################################################################')
@@ -2818,7 +2918,7 @@ function Format-IPQFixedWidth {
         [ValidateSet('Left', 'Center', 'Right')][string]$Align = 'Left'
     )
 
-    $value = "$Text"
+    $value = ConvertTo-IPQDisplayText "$Text"
     while ((Get-IPQDisplayWidth $value) -gt $Width -and $value.Length -gt 0) {
         $value = $value.Substring(0, $value.Length - 1)
     }
@@ -2852,12 +2952,12 @@ function Write-IPQBadge {
 
     $text = Format-IPQCell $Value
     $cell = Format-IPQFixedWidth -Text $text -Width $Width -Align Center
-    Write-Host -NoNewline $cell -ForegroundColor White -BackgroundColor (Get-IPQBadgeColor $text)
+    Write-IPQHost -NoNewline $cell -ForegroundColor White -BackgroundColor (Get-IPQBadgeColor $text)
 }
 
 function Write-IPQSectionTitle {
     param([Parameter(Mandatory)][string]$Text)
-    Write-Host $Text -ForegroundColor White
+    Write-IPQHost $Text -ForegroundColor White
 }
 
 function Write-IPQKeyValue {
@@ -2866,8 +2966,8 @@ function Write-IPQKeyValue {
         [AllowNull()][object]$Value,
         [ConsoleColor]$Color = 'Green'
     )
-    Write-Host -NoNewline (Format-IPQFixedWidth -Text $Label -Width 22) -ForegroundColor Cyan
-    Write-Host (Format-IPQCell $Value) -ForegroundColor $Color
+    Write-IPQHost -NoNewline (Format-IPQFixedWidth -Text $Label -Width 22) -ForegroundColor Cyan
+    Write-IPQHost (Format-IPQCell $Value) -ForegroundColor $Color
 }
 
 function Write-IPQMatrixHeader {
@@ -2877,11 +2977,11 @@ function Write-IPQMatrixHeader {
         [ValidateRange(5, 16)][int]$CellWidth,
         [ValidateRange(5, 16)][int]$LabelWidth = 9
     )
-    Write-Host -NoNewline (Format-IPQFixedWidth -Text $Label -Width $LabelWidth) -ForegroundColor Cyan
+    Write-IPQHost -NoNewline (Format-IPQFixedWidth -Text $Label -Width $LabelWidth) -ForegroundColor Cyan
     foreach ($value in $Values) {
-        Write-Host -NoNewline (Format-IPQFixedWidth -Text $value -Width $CellWidth -Align Center) -ForegroundColor DarkCyan
+        Write-IPQHost -NoNewline (Format-IPQFixedWidth -Text $value -Width $CellWidth -Align Center) -ForegroundColor DarkCyan
     }
-    Write-Host ''
+    Write-IPQHost ''
 }
 
 function Write-IPQMatrixBadges {
@@ -2891,24 +2991,24 @@ function Write-IPQMatrixBadges {
         [ValidateRange(5, 16)][int]$CellWidth,
         [ValidateRange(5, 16)][int]$LabelWidth = 9
     )
-    Write-Host -NoNewline (Format-IPQFixedWidth -Text $Label -Width $LabelWidth) -ForegroundColor Cyan
+    Write-IPQHost -NoNewline (Format-IPQFixedWidth -Text $Label -Width $LabelWidth) -ForegroundColor Cyan
     foreach ($value in $Values) {
         $text = Format-IPQCell $value
         if ($text -in @('-', '不可用', '未知')) {
-            Write-Host -NoNewline (Format-IPQFixedWidth -Text $text -Width $CellWidth -Align Center) -ForegroundColor DarkGray
+            Write-IPQHost -NoNewline (Format-IPQFixedWidth -Text $text -Width $CellWidth -Align Center) -ForegroundColor DarkGray
             continue
         }
         $badgeWidth = [Math]::Min(
             $CellWidth - 1,
-            [Math]::Max(4, (Get-IPQDisplayWidth $text) + 2)
+            [Math]::Max(4, (Get-IPQDisplayWidth (ConvertTo-IPQDisplayText $text)) + 2)
         )
         $leftPadding = [Math]::Floor(($CellWidth - $badgeWidth) / 2)
         $rightPadding = $CellWidth - $badgeWidth - $leftPadding
-        Write-Host -NoNewline (' ' * $leftPadding)
+        Write-IPQHost -NoNewline (' ' * $leftPadding)
         Write-IPQBadge -Value $text -Width $badgeWidth
-        Write-Host -NoNewline (' ' * $rightPadding)
+        Write-IPQHost -NoNewline (' ' * $rightPadding)
     }
-    Write-Host ''
+    Write-IPQHost ''
 }
 
 function Write-IPQMatrixTexts {
@@ -2918,7 +3018,7 @@ function Write-IPQMatrixTexts {
         [ValidateRange(5, 16)][int]$CellWidth,
         [ValidateRange(5, 16)][int]$LabelWidth = 9
     )
-    Write-Host -NoNewline (Format-IPQFixedWidth -Text $Label -Width $LabelWidth) -ForegroundColor Cyan
+    Write-IPQHost -NoNewline (Format-IPQFixedWidth -Text $Label -Width $LabelWidth) -ForegroundColor Cyan
     foreach ($value in $Values) {
         $text = Format-IPQCell $value
         $color = switch ($text) {
@@ -2928,9 +3028,9 @@ function Write-IPQMatrixTexts {
             '-' { 'DarkGray' }
             default { 'Green' }
         }
-        Write-Host -NoNewline (Format-IPQFixedWidth -Text $text -Width $CellWidth -Align Center) -ForegroundColor $color
+        Write-IPQHost -NoNewline (Format-IPQFixedWidth -Text $text -Width $CellWidth -Align Center) -ForegroundColor $color
     }
-    Write-Host ''
+    Write-IPQHost ''
 }
 
 function Write-IPQRiskBar {
@@ -3012,20 +3112,20 @@ function Write-IPQRiskBar {
     }
     $track = -join $characters
 
-    Write-Host -NoNewline (Format-IPQFixedWidth -Text "$displayName：" -Width 17) -ForegroundColor Cyan
+    Write-IPQHost -NoNewline (Format-IPQFixedWidth -Text "$displayName：" -Width 17) -ForegroundColor Cyan
     $greenLength = [Math]::Min(16, $coloredWidth)
     $yellowLength = [Math]::Min(16, [Math]::Max(0, $coloredWidth - 16))
     $redLength = [Math]::Max(0, $coloredWidth - 32)
     if ($greenLength -gt 0) {
-        Write-Host -NoNewline $track.Substring(0, $greenLength) -ForegroundColor White -BackgroundColor DarkGreen
+        Write-IPQHost -NoNewline $track.Substring(0, $greenLength) -ForegroundColor White -BackgroundColor DarkGreen
     }
     if ($yellowLength -gt 0) {
-        Write-Host -NoNewline $track.Substring(16, $yellowLength) -ForegroundColor White -BackgroundColor DarkYellow
+        Write-IPQHost -NoNewline $track.Substring(16, $yellowLength) -ForegroundColor White -BackgroundColor DarkYellow
     }
     if ($redLength -gt 0) {
-        Write-Host -NoNewline $track.Substring(32, $redLength) -ForegroundColor White -BackgroundColor DarkRed
+        Write-IPQHost -NoNewline $track.Substring(32, $redLength) -ForegroundColor White -BackgroundColor DarkRed
     }
-    Write-Host $riskLevel -ForegroundColor (Get-IPQBadgeColor $riskLevel)
+    Write-IPQHost $riskLevel -ForegroundColor (Get-IPQBadgeColor $riskLevel)
 }
 
 function Write-IPQPrettyReport {
@@ -3034,15 +3134,16 @@ function Write-IPQPrettyReport {
 
     $lineWidth = 72
     $separator = '#' * $lineWidth
-    Write-Host $separator -ForegroundColor DarkGray
-    Write-Host (Format-IPQFixedWidth -Text "IP质量体检报告：$($Result.Head.Address)" -Width $lineWidth -Align Center) -ForegroundColor Green
-    Write-Host (Format-IPQFixedWidth -Text $script:RepositoryUrl -Width $lineWidth -Align Center) -ForegroundColor DarkCyan
+    Write-IPQHost $separator -ForegroundColor DarkGray
+    Write-IPQHost (Format-IPQFixedWidth -Text "IP质量体检报告：$($Result.Head.Address)" -Width $lineWidth -Align Center) -ForegroundColor Green
+    Write-IPQHost (Format-IPQFixedWidth -Text $script:RepositoryUrl -Width $lineWidth -Align Center) -ForegroundColor DarkCyan
     $reportTime = Get-IPQValue $Result.Head 'TimeLocal' (Get-IPQValue $Result.Head 'TimeUtc')
+    if ($script:IPQOutputLanguage -ne 'cn') { $reportTime = Get-IPQValue $Result.Head 'TimeUtc' $reportTime }
     $upstreamVersion = Get-IPQValue $Result.Head 'UpstreamVersion' (Get-IPQValue $Result.Head 'Version')
-    Write-Host (Format-IPQFixedWidth -Text "报告时间：$reportTime  脚本版本：$upstreamVersion" -Width $lineWidth -Align Center) -ForegroundColor Gray
-    Write-Host $separator -ForegroundColor DarkGray
+    Write-IPQHost (Format-IPQFixedWidth -Text "报告时间：$reportTime  脚本版本：$upstreamVersion" -Width $lineWidth -Align Center) -ForegroundColor Gray
+    Write-IPQHost $separator -ForegroundColor DarkGray
 
-    Write-IPQSectionTitle '一、基础信息（Maxmind 数据库）'
+    Write-IPQSectionTitle $(if ((Get-IPQValue $Result.Info 'Source' 'MaxMind') -eq 'IPinfo') { '一、基础信息（IPinfo 数据库）' } else { '一、基础信息（Maxmind 数据库）' })
     Write-IPQKeyValue '自治系统号：' "AS$(Format-IPQCell (Get-IPQValue $Result.Info 'ASN'))"
     Write-IPQKeyValue '组织：' (Get-IPQValue $Result.Info 'Organization')
     $cityParts = @(
@@ -3063,14 +3164,14 @@ function Write-IPQPrettyReport {
     Write-IPQKeyValue '注册地：' "[$(Format-IPQCell (Get-IPQValue $Result.Info 'RegisteredCountryCode'))] $(Format-IPQCell (Get-IPQValue $Result.Info 'RegisteredCountry'))"
     Write-IPQKeyValue '时区：' (Get-IPQValue $Result.Info 'TimeZone')
     $geoType = Get-IPQValue $Result.Info 'GeoType' '未知'
-    Write-Host -NoNewline (Format-IPQFixedWidth -Text 'IP类型：' -Width 22) -ForegroundColor Cyan
-    Write-Host -NoNewline '   '
+    Write-IPQHost -NoNewline (Format-IPQFixedWidth -Text 'IP类型：' -Width 22) -ForegroundColor Cyan
+    Write-IPQHost -NoNewline '   '
     Write-IPQBadge -Value $geoType -Width 8
-    Write-Host ''
+    Write-IPQHost ''
 
     Write-IPQSectionTitle '二、IP类型属性'
     if (@($Result.DataSources).Count -eq 0) {
-        Write-Host '已跳过' -ForegroundColor DarkGray
+        Write-IPQHost '已跳过' -ForegroundColor DarkGray
     }
     else {
         $assessment = Get-IPQValue $Result 'TypeAssessment'
@@ -3084,10 +3185,10 @@ function Write-IPQPrettyReport {
     }
 
     Write-IPQSectionTitle '三、风险评分'
-    Write-Host -NoNewline (Format-IPQFixedWidth -Text '风险等级：' -Width 17) -ForegroundColor Cyan
-    Write-Host -NoNewline (Format-IPQFixedWidth -Text '极低       低' -Width 16 -Align Center) -ForegroundColor White -BackgroundColor DarkGreen
-    Write-Host -NoNewline (Format-IPQFixedWidth -Text '中等' -Width 16 -Align Center) -ForegroundColor White -BackgroundColor DarkYellow
-    Write-Host (Format-IPQFixedWidth -Text '高       极高' -Width 16 -Align Center) -ForegroundColor White -BackgroundColor DarkRed
+    Write-IPQHost -NoNewline (Format-IPQFixedWidth -Text '风险等级：' -Width 17) -ForegroundColor Cyan
+    Write-IPQHost -NoNewline (Format-IPQFixedWidth -Text '极低       低' -Width 16 -Align Center) -ForegroundColor White -BackgroundColor DarkGreen
+    Write-IPQHost -NoNewline (Format-IPQFixedWidth -Text '中等' -Width 16 -Align Center) -ForegroundColor White -BackgroundColor DarkYellow
+    Write-IPQHost (Format-IPQFixedWidth -Text '高       极高' -Width 16 -Align Center) -ForegroundColor White -BackgroundColor DarkRed
         $scoreSources = @(
             foreach ($name in @('IP2Location', 'Scamalytics', 'ipapi', 'AbuseIPDB', 'IPQS', 'DB-IP')) {
                 $Result.DataSources |
@@ -3096,7 +3197,7 @@ function Write-IPQPrettyReport {
             }
         )
     if ($scoreSources.Count -eq 0) {
-        Write-Host '没有可用评分' -ForegroundColor DarkGray
+        Write-IPQHost '没有可用评分' -ForegroundColor DarkGray
     }
     else {
         foreach ($source in $scoreSources) {
@@ -3106,7 +3207,7 @@ function Write-IPQPrettyReport {
 
     Write-IPQSectionTitle '四、风险因子'
     if (@($Result.DataSources).Count -eq 0) {
-        Write-Host '已跳过' -ForegroundColor DarkGray
+        Write-IPQHost '已跳过' -ForegroundColor DarkGray
     }
     else {
         $factorOrder = @('IP2Location', 'ipapi', 'ipregistry', 'IPQS', 'Scamalytics', 'ipdata', 'IPinfo', 'DB-IP')
@@ -3116,8 +3217,8 @@ function Write-IPQPrettyReport {
             $factorSourceList.Add($(if ($match.Count) { $match[0] } else { $null }))
         }
         $factorSources = $factorSourceList.ToArray()
-        Write-Host -NoNewline '库： ' -ForegroundColor Cyan
-        Write-Host 'IP2Location ipapi ipregistry IPQS SCAMALYTICS ipdata IPinfo DB-IP' -ForegroundColor DarkCyan
+        Write-IPQHost -NoNewline '库： ' -ForegroundColor Cyan
+        Write-IPQHost 'IP2Location ipapi ipregistry IPQS SCAMALYTICS ipdata IPinfo DB-IP' -ForegroundColor DarkCyan
         Write-IPQMatrixTexts -Label '地区：' -Values @($factorSources | ForEach-Object { if ($null -ne $_ -and $_.Available -and $_.CountryCode) { "[$($_.CountryCode)]" } else { '-' } }) -CellWidth 8 -LabelWidth 8
         foreach ($definition in @(
             @('代理：', 'Proxy'),
@@ -3138,7 +3239,7 @@ function Write-IPQPrettyReport {
 
     Write-IPQSectionTitle '五、流媒体及AI服务解锁检测'
     if (@($Result.Media.PSObject.Properties).Count -eq 0) {
-        Write-Host '已跳过' -ForegroundColor DarkGray
+        Write-IPQHost '已跳过' -ForegroundColor DarkGray
     }
     else {
         $mediaOrder = @('TikTok', 'DisneyPlus', 'Netflix', 'YouTubePremium', 'AmazonPrimeVideo', 'Reddit', 'ChatGPT')
@@ -3155,9 +3256,9 @@ function Write-IPQPrettyReport {
     }
 
     Write-IPQSectionTitle '六、邮局连通性及黑名单检测'
-    Write-Host -NoNewline '本地25端口出站：' -ForegroundColor Cyan
+    Write-IPQHost -NoNewline '本地25端口出站：' -ForegroundColor Cyan
     if ($null -eq $Result.Mail) {
-        Write-Host '已跳过' -ForegroundColor DarkGray
+        Write-IPQHost '已跳过' -ForegroundColor DarkGray
     }
     else {
         $port25Status = if ($null -ne $Result.Mail.PSObject.Properties['Port25Status']) {
@@ -3172,23 +3273,23 @@ function Write-IPQPrettyReport {
             '代理不测' { 'DarkYellow' }
             default { 'Red' }
         }
-        Write-Host $port25Status -ForegroundColor $port25Color
+        Write-IPQHost $port25Status -ForegroundColor $port25Color
     }
     if ($null -ne $Result.Mail) {
         $serviceProperties = @($Result.Mail.Services.PSObject.Properties)
-        Write-Host -NoNewline '通信：  ' -ForegroundColor Cyan
+        Write-IPQHost -NoNewline '通信：  ' -ForegroundColor Cyan
         foreach ($property in $serviceProperties) {
-            Write-Host -NoNewline $property.Name -ForegroundColor White -BackgroundColor $(if ($property.Value) { 'DarkGreen' } else { 'DarkRed' })
-            Write-Host -NoNewline ' '
+            Write-IPQHost -NoNewline $property.Name -ForegroundColor White -BackgroundColor $(if ($property.Value) { 'DarkGreen' } else { 'DarkRed' })
+            Write-IPQHost -NoNewline ' '
         }
-        Write-Host ''
+        Write-IPQHost ''
     }
-    Write-Host -NoNewline 'IP地址黑名单数据库：  ' -ForegroundColor Cyan
+    Write-IPQHost -NoNewline 'IP地址黑名单数据库：  ' -ForegroundColor Cyan
     if ($null -eq $Result.DNSBlacklist) {
-        Write-Host -NoNewline '已跳过' -ForegroundColor DarkGray
+        Write-IPQHost -NoNewline '已跳过' -ForegroundColor DarkGray
     }
     elseif (-not $Result.DNSBlacklist.Supported) {
-        Write-Host -NoNewline '不支持' -ForegroundColor DarkGray
+        Write-IPQHost -NoNewline '不支持' -ForegroundColor DarkGray
     }
     else {
         foreach ($summary in @(
@@ -3197,18 +3298,20 @@ function Write-IPQPrettyReport {
             @("已标记 $($Result.DNSBlacklist.Marked)", 'Yellow'),
             @("黑名单 $($Result.DNSBlacklist.Blacklisted)", 'Red')
         )) {
-            Write-Host -NoNewline "$($summary[0])   " -ForegroundColor $summary[1]
+            Write-IPQHost -NoNewline "$($summary[0])   " -ForegroundColor $summary[1]
         }
     }
-    Write-Host ''
+    Write-IPQHost ''
 
-    Write-Host ('=' * $lineWidth) -ForegroundColor DarkGray
+    $reportLink = Get-IPQValue $Result.Head 'ReportLink'
+    Write-IPQHost $(if ($reportLink) { $reportLink } else { '=' * $lineWidth }) -ForegroundColor DarkGray
 }
 
 function Format-IPQualityReport {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object]$Result)
 
+    $script:IPQOutputLanguage = Get-IPQValue $Result.Head 'Language' 'cn'
     $terminalWidth = 0
     try {
         $terminalWidth = $Host.UI.RawUI.WindowSize.Width
@@ -3249,6 +3352,9 @@ function Export-IPQualityReport {
             $Result | ConvertTo-Json -Depth 12
         }
     }
+    elseif ([IO.Path]::GetExtension($fullPath) -ieq '.ansi') {
+        $content = ($Result | ForEach-Object { Get-IPQualityReportAnsi -Result $_ }) -join "`r`n`r`n"
+    }
     else {
         $content = ($Result | ForEach-Object { Get-IPQualityReportText -Result $_ }) -join "`r`n`r`n"
     }
@@ -3265,9 +3371,14 @@ function Export-IPQualityReport {
     }
 }
 
+. (Join-Path $PSScriptRoot 'IPQuality.Features.ps1')
+
 Export-ModuleMember -Function @(
     'Invoke-IPQualityCheck',
     'Format-IPQualityReport',
     'Get-IPQualityReportText',
-    'Export-IPQualityReport'
+    'Export-IPQualityReport',
+    'Get-IPQualityReportAnsi',
+    'ConvertTo-IPQualityUpstreamReport',
+    'Publish-IPQualityReport'
 )

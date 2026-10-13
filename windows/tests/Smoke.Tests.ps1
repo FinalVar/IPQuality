@@ -32,6 +32,8 @@ $windowsRoot = Split-Path -Parent $PSScriptRoot
 $repositoryRoot = Split-Path -Parent $windowsRoot
 $modulePath = Join-Path $windowsRoot 'IPQuality.psm1'
 $baselinePath = Join-Path $windowsRoot 'compatibility-baseline.json'
+& (Join-Path $PSScriptRoot 'Encoding.Tests.ps1') -ModulePath $modulePath
+& (Join-Path $PSScriptRoot 'UpstreamParity.Tests.ps1')
 Import-Module $modulePath -Force
 $module = Get-Module IPQuality
 $moduleScript = Get-Content -Raw $modulePath
@@ -650,10 +652,20 @@ try {
         'keep',
         [Text.UTF8Encoding]::new($false)
     )
+    $retiredReference = Join-Path $installTemporaryRoot 'ref\retired-upstream.ans'
+    [IO.File]::WriteAllText($retiredReference, 'original retired content')
+    $upgradeManifestPath = Join-Path $installTemporaryRoot '.ipquality-install.json'
+    $upgradeManifest = Get-Content -Raw $upgradeManifestPath | ConvertFrom-Json
+    $upgradeManifest.RefFiles += 'retired-upstream.ans'
+    [IO.File]::WriteAllText($upgradeManifestPath, ($upgradeManifest | ConvertTo-Json -Depth 8))
     $secondInstall = & $installer `
         -Destination $installTemporaryRoot `
         -NoPath
     Assert-True $secondInstall.Upgraded '重复安装应识别为幂等升级'
+    Assert-True (-not (Test-Path -LiteralPath $retiredReference)) '上游删除的数据不能留在活动 ref 目录'
+    $retiredCopies = @(Get-ChildItem -LiteralPath (Join-Path $installTemporaryRoot 'retired-ref') -File -Recurse -Filter 'retired-upstream.ans')
+    Assert-Equal $retiredCopies.Count 1 '移除的受管参考文件应有一份可回滚副本'
+    Assert-Equal (Get-Content -LiteralPath $retiredCopies[0].FullName -Raw) 'original retired content' '回滚副本不得改写原文'
     Assert-Equal $secondInstall.SourceFingerprint (
         $firstManifest.SourceFingerprint
     ) '同一来源重复安装必须产生相同内容指纹'

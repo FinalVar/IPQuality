@@ -298,6 +298,13 @@ if ($manifestExists) {
         throw "现有安装清单无法读取，已拒绝覆盖：$manifestPath"
     }
     $manifestProperties = @($previousManifest.PSObject.Properties.Name)
+    if ('RefFiles' -in $manifestProperties) {
+        foreach ($oldName in $previousManifest.RefFiles) {
+            if ([IO.Path]::GetFileName("$oldName") -ne "$oldName" -or "$oldName" -match '[\\/:]' -or "$oldName" -in @('.','..','')) {
+                throw '现有清单含有越界的参考文件名，已拒绝升级。'
+            }
+        }
+    }
     if (
         'Product' -notin $manifestProperties -or
         'Destination' -notin $manifestProperties -or
@@ -478,6 +485,18 @@ $sourceRefFiles = @(
     Join-Path $sourceRoot 'ref'
 ) -File
 )
+if ($null -ne $previousManifest -and $previousManifest.PSObject.Properties['RefFiles']) {
+    foreach ($oldName in $previousManifest.RefFiles) {
+        if ($oldName -notin $sourceRefFiles.Name) {
+            $oldFile = Join-Path $destinationRef $oldName
+            if (Test-Path -LiteralPath $oldFile -PathType Leaf) {
+                $retired = Join-Path $destinationRoot ('retired-ref/backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
+                [IO.Directory]::CreateDirectory($retired) | Out-Null
+                Move-Item -LiteralPath $oldFile -Destination (Join-Path $retired $oldName)
+            }
+        }
+    }
+}
 foreach ($sourceFile in $sourceRefFiles) {
     Copy-Item -LiteralPath $sourceFile.FullName `
         -Destination $destinationRef `
@@ -487,6 +506,9 @@ foreach ($sourceFile in $sourceRefFiles) {
 $runtimeFiles = @(
     'IPQuality.ps1',
     'IPQuality.psm1',
+    'IPQuality.Features.ps1',
+    'Show-IPQualityMenu.ps1',
+    'CLI-HELP.txt',
     'Start-IPQuality.ps1',
     'Start-IPQuality.cmd',
     'Prompt-Node.ps1',

@@ -1,18 +1,33 @@
 #Requires -Version 7.2
 [CmdletBinding()]
 param(
-    [switch]$IPv4,
-    [switch]$IPv6,
+    [Alias('4')][switch]$IPv4,
+    [Alias('6')][switch]$IPv6,
+    [switch]$DualStack,
     [switch]$Direct,
-    [string]$Proxy,
-    [switch]$FullIP,
+    [Alias('x')][string]$Proxy,
+    [Alias('i')][string]$Interface,
+    [Alias('f')][switch]$FullIP,
+    [Alias('j')][switch]$Json,
+    [Alias('l')][ValidateSet('cn','en','jp','es','de','fr','ru','pt')][string]$Language = 'cn',
+    [Alias('E')][switch]$English,
+    [Alias('p')][switch]$Privacy,
+    [switch]$AllowOnlineReport,
+    [switch]$UpstreamJson,
+    [Alias('h')][switch]$Help,
+    [Alias('M')][switch]$Menu,
+    [switch]$ShowSponsors,
+    [switch]$CountRun,
+    [Alias('n')][switch]$NoDependencyCheck,
+    [Alias('y')][switch]$InstallDependencies,
     [switch]$Lite,
     [switch]$NoRisk,
     [switch]$NoMedia,
     [switch]$NoMail,
     [switch]$NoDnsbl,
     [switch]$NoSave,
-    [string]$Output,
+    [Alias('o')][string]$Output,
+    [switch]$Force,
     [ValidateRange(2, 60)][int]$TimeoutSeconds = 10,
     [ValidateRange(1, 100)][int]$DnsblConcurrency = 40,
     [ValidateRange(8, 32)][int]$ConsoleFontSize = 18
@@ -20,6 +35,19 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if ($Help) { & (Join-Path $PSScriptRoot 'IPQuality.ps1') -Help; return }
+if ($Menu) { & (Join-Path $PSScriptRoot 'Show-IPQualityMenu.ps1'); return }
+if ($ShowSponsors) { & (Join-Path $PSScriptRoot 'IPQuality.ps1') -ShowSponsors; return }
+if ($UpstreamJson) { $Json = $true }
+if ($Json) { $InformationPreference = 'SilentlyContinue'; $ProgressPreference = 'SilentlyContinue' }
+function Write-IPQLauncherStatus {
+    param([string]$Text, [ConsoleColor]$ForegroundColor)
+    if (-not $Json) { Write-Host $Text -ForegroundColor $ForegroundColor }
+}
+if ($Privacy -and $AllowOnlineReport) { throw '-Privacy 与 -AllowOnlineReport 不能同时使用。' }
+if ($DualStack -and ($IPv4 -or $IPv6)) { throw '-DualStack 与 -IPv4/-IPv6 不能同时使用。' }
+if ($DualStack -and -not $Json -and -not [Console]::IsOutputRedirected) { throw '双栈用于 JSON 或重定向输出；可见窗口请分别检测 IPv4、IPv6。' }
+if ($Interface -and -not $Direct) { throw '指定本机源地址/接口时请同时使用 -Direct，避免自动代理改变检测路径。' }
 
 if ($IPv4 -and $IPv6) {
     throw 'IPv4 与 IPv6 不能同时指定。分别运行两次可得到更清晰的单窗口报告。'
@@ -171,25 +199,25 @@ function Protect-IPQLauncherAddress {
 $family = if ($IPv6) { 6 } else { 4 }
 $selectedProxy = $Proxy
 if (-not $Direct -and -not $selectedProxy) {
-    Write-Host '正在识别当前节点的本地代理...' -ForegroundColor Cyan
+    Write-IPQLauncherStatus '正在识别当前节点的本地代理...' -ForegroundColor Cyan
     $detected = Find-IPQCurrentProxy -AddressFamily $family
     if ($null -eq $detected) {
         throw '没有找到可用的当前节点代理。请先在 v2rayN 中启用节点，或显式使用 -Proxy；测本地直连请使用 -Direct。'
     }
     $selectedProxy = $detected.Proxy
-    Write-Host "当前节点代理：$(Get-IPQProxyDisplayName $selectedProxy)" -ForegroundColor Green
-    Write-Host "预检出口：$(Protect-IPQLauncherAddress $detected.Address)" -ForegroundColor Green
+    Write-IPQLauncherStatus "当前节点代理：$(Get-IPQProxyDisplayName $selectedProxy)" -ForegroundColor Green
+    Write-IPQLauncherStatus "预检出口：$(Protect-IPQLauncherAddress $detected.Address)" -ForegroundColor Green
 }
 elseif ($selectedProxy) {
     $validated = Test-IPQProxyCandidate -Value $selectedProxy -AddressFamily $family
     if ($null -eq $validated) {
         throw "代理不可用：$(Get-IPQProxyDisplayName $selectedProxy)"
     }
-    Write-Host "指定代理：$(Get-IPQProxyDisplayName $selectedProxy)" -ForegroundColor Green
-    Write-Host "预检出口：$(Protect-IPQLauncherAddress $validated.Address)" -ForegroundColor Green
+    Write-IPQLauncherStatus "指定代理：$(Get-IPQProxyDisplayName $selectedProxy)" -ForegroundColor Green
+    Write-IPQLauncherStatus "预检出口：$(Protect-IPQLauncherAddress $validated.Address)" -ForegroundColor Green
 }
 else {
-    Write-Host '检测路径：本机直连' -ForegroundColor Yellow
+    Write-IPQLauncherStatus '检测路径：本机直连' -ForegroundColor Yellow
 }
 
 if (-not $NoSave -and -not $Output) {
@@ -204,8 +232,10 @@ $invokeParameters = @{
     TimeoutSeconds = $TimeoutSeconds
     DnsblConcurrency = $DnsblConcurrency
     ConsoleFontSize = $ConsoleFontSize
+    Language = $Language
 }
-$invokeParameters[$(if ($family -eq 4) { 'IPv4' } else { 'IPv6' })] = $true
+if (-not $DualStack) { $invokeParameters[$(if ($family -eq 4) { 'IPv4' } else { 'IPv6' })] = $true }
+if ($Interface) { $invokeParameters.Interface = $Interface }
 if ($selectedProxy) {
     $invokeParameters.Proxy = $selectedProxy
 }
@@ -216,6 +246,15 @@ foreach ($entry in ([ordered]@{
     NoMedia = $NoMedia
     NoMail = $NoMail
     NoDnsbl = $NoDnsbl
+    Json = $Json
+    English = $English
+    Privacy = $Privacy
+    AllowOnlineReport = $AllowOnlineReport
+    UpstreamJson = $UpstreamJson
+    NoDependencyCheck = $NoDependencyCheck
+    InstallDependencies = $InstallDependencies
+    Force = $Force
+    CountRun = $CountRun
 }).GetEnumerator()) {
     if ($entry.Value) {
         $invokeParameters[$entry.Key] = $true

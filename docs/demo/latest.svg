@@ -11,7 +11,7 @@
 <rect x="32" y="120" width="720" height="20" fill="#101827"/>
 <text x="32" y="136" fill="#22d3ee" font-family="Consolas, 'Microsoft YaHei', monospace" font-size="16" textLength="720" lengthAdjust="spacingAndGlyphs" xml:space="preserve">                 https://github.com/FinalVar/IPQuality                  </text>
 <rect x="32" y="140" width="720" height="20" fill="#101827"/>
-<text x="32" y="156" fill="#d1d5db" font-family="Consolas, 'Microsoft YaHei', monospace" font-size="16" textLength="720" lengthAdjust="spacingAndGlyphs" xml:space="preserve">           报告时间：2026-01-01 00:00:00 UTC  脚本版本：0.7.1           </text>
+<text x="32" y="156" fill="#d1d5db" font-family="Consolas, 'Microsoft YaHei', monospace" font-size="16" textLength="720" lengthAdjust="spacingAndGlyphs" xml:space="preserve">           报告时间：2026-01-01 00:00:00 UTC  脚本版本：0.8.0           </text>
 <rect x="32" y="160" width="720" height="20" fill="#101827"/>
 <text x="32" y="176" fill="#94a3b8" font-family="Consolas, 'Microsoft YaHei', monospace" font-size="16" textLength="720" lengthAdjust="spacingAndGlyphs" xml:space="preserve">########################################################################</text>
 <rect x="32" y="180" width="300" height="20" fill="#101827"/>

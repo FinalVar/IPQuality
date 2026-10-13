@@ -1,6 +1,6 @@
 {
   "Head": {
-    "Version": "0.7.1",
+    "Version": "0.8.0",
     "Address": "203.0.*.*",
     "AddressFamily": "IPv4",
     "RouteType": "Direct",

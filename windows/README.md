@@ -18,7 +18,7 @@ Docker、WSL、Bash、`jq`、`dig` 或 `nc`。
 - PowerShell 7.2 或更新版本；
 - Windows 自带的 `curl.exe`。
 
-从[版本化发行页](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.7.1-preview.1)
+从[版本化发行页](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.8.0-preview.1)
 下载 `latest.zip`，对照同页 `latest.sha256` 后解压，
 然后双击根目录的：
 
@@ -26,7 +26,7 @@ Docker、WSL、Bash、`jq`、`dig` 或 `nc`。
 Install.cmd
 ```
 
-当前是 0.7.1 公开预览版，验证范围见[发行验证记录](../docs/verification-latest.md)。
+当前是 0.8.0 公开预览版，验证范围见[发行验证记录](../docs/verification-latest.md)。
 需要跟进未发布的开发版本时才使用
 [`windows-native` 分支 ZIP](https://github.com/FinalVar/IPQuality/archive/refs/heads/windows-native.zip)。
 
@@ -144,8 +144,8 @@ f580782c6dd10f7691c66cea1d7c421813c5fbf7e305d1ee7ce0c3a40d196341
 - TikTok、Disney+、Netflix、YouTube Premium、Amazon Prime Video、
   Reddit、ChatGPT 的状态、地区和原生/DNS 解锁方式；
 - 12 家邮件服务的 TCP 25 端口连通性；
-- 上游列表中的 439 个唯一 DNSBL；
-- 彩色控制台、JSON 和纯文本报告。
+- 上游列表中的 423 个唯一 DNSBL；
+- 中英文彩色控制台、JSON、ANSI 和纯文本报告。
 
 `-Lite` 当前保留 IPinfo、ipregistry、ipapi 和 DB-IP 四个风险来源，不等同于
 跳过媒体、邮件或 DNSBL。
@@ -188,7 +188,7 @@ JSON 的 `Head` 明确区分：
 - `CompatibilityReviewed`：代码、上游脚本和 DNSBL 列表是否匹配已审核清单。
 
 默认报告不保存完整出口 IP、代理 URL、`ss://` 节点或密码。使用 `-FullIP` 会把完整
-出口 IP 写入结果。工具不会上传组装后的完整报告，但检测必须向列出的地理、风险和
+出口 IP 写入结果。工具默认不上传组装后的完整报告；显式 -AllowOnlineReport 可上传至官方 Check.Place。检测必须向列出的地理、风险和
 流媒体服务发送网络请求，因此这些服务能够看到被测出口 IP；DNSBL 查询还会把反向
 查询名称交给本机配置的 DNS 解析器。
 
@@ -276,3 +276,32 @@ Uninstall.cmd
 Windows 目录是 `xykt/IPQuality` 的衍生实现，继续使用仓库的 AGPL-3.0 许可证。
 报告抬头显示当前实现仓库 `FinalVar/IPQuality`，上游来源和审核基线继续完整保留在
 JSON 与维护文档中。
+
+## 0.8.0 官方同步与新增选项
+
+当前基线为官方 `87397e2c3196ec796f5477c83343c2354df601ea` / `v2026-09-16`。
+完整对应关系与差异见[特性核对记录](../docs/upstream-sync/latest.md)。
+
+| 选项 | 功能 |
+|---|---|
+| `-English` / `-E` | 英文标签与英文基础信息 |
+| `-Language` / `-l` | cn/en/jp/es/de/fr/ru/pt；非 cn 使用英文标签 |
+| `-Json` / `-j` | 原生 JSON；只向标准输出写 JSON |
+| `-UpstreamJson` | 官方七部分字段结构；同时保留原生详细 JSON 能力 |
+| `-Output latest.ansi` | 带色彩的 ANSI 报告；.json 为 JSON，其他扩展名为纯文本 |
+| `-AllowOnlineReport` | 显式上传官方在线报告；链接写入本地 JSON 和报告末行 |
+| `-Privacy` / `-p` | 不上传整份报告，默认即为此行为；与上传选项互斥 |
+| `-Menu` / `-M` | Windows 本地交互菜单 |
+| `-Interface` / `-i` | 指定网卡别名或本机源 IP；日常入口同时指定 `-Direct` |
+| `-DualStack -Json` | 日常入口双栈自动化检测 |
+| `-ShowSponsors` | 查看同步保存的官方作者和赞助内容 |
+| `-CountRun` | 显式调用官方运行计数，保存至原生 JSON Head.RunCounter |
+| `-Help` / `-h` | 完整帮助，无网络访问 |
+
+`ipq.cmd` 入口接受官方短参数 `-4/-6/-f/-x/-o`。直接在 PowerShell 中调用 .ps1
+时推荐 `-IPv4/-IPv6` 长参数，避免 PowerShell 把负数 token 当作位置参数。
+`-n/-y` 保留为 Windows 依赖适配选项；运行环境由 Windows 安装器准备。
+MaxMind 无法返回基础信息时自动转为官方 IPinfo Lite 回退。
+
+默认字体仍为 Consolas 18、74×47；不会为了增加功能扩大报告缓冲区。
+在线分享依赖官方服务；外部 API、TLS 或 DNS 错误保留在本地 JSON，不能视为低风险。

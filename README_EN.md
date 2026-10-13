@@ -2,7 +2,7 @@
 
 **Inspect your proxy exit IP, risk signals and service reachability on Windows. No Docker or WSL.**
 
-[中文](README.md) · [Download preview](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.7.1-preview.1) · [User guide](windows/README_EN.md) · [Report a problem](https://github.com/FinalVar/IPQuality/issues/new/choose)
+[中文](README.md) · [Download preview](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.8.0-preview.1) · [User guide](windows/README_EN.md) · [Report a problem](https://github.com/FinalVar/IPQuality/issues/new/choose)
 
 [![Windows tests](https://github.com/FinalVar/IPQuality/actions/workflows/windows-native.yml/badge.svg?branch=windows-native)](https://github.com/FinalVar/IPQuality/actions/workflows/windows-native.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
@@ -16,7 +16,7 @@ This is not an official upstream Windows release.
 ## Get started
 
 1. Install [Microsoft PowerShell 7.2 or newer](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows).
-2. Download `latest.zip` from the [versioned release](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.7.1-preview.1), extract it and double-click `Install.cmd`. Administrator rights are not required.
+2. Download `latest.zip` from the [versioned release](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.8.0-preview.1), extract it and double-click `Install.cmd`. Administrator rights are not required.
 3. Open a new terminal:
 
 ```powershell
@@ -48,7 +48,7 @@ in proxy mode. See the [routing contract](windows/README_EN.md).
 
 ## Downloads and verification
 
-The current release is **0.7.1 public preview**. Its versioned release contains
+The current release is **0.8.0 public preview**. Its versioned release contains
 `latest.zip`, `latest.sha256`, and `latest.json` with the source commit and file
 hashes. Use a versioned release for a repeatable download; branch ZIPs change.
 
@@ -58,12 +58,11 @@ Get-Content .\latest.sha256
 ```
 
 Compare both hashes before installation. This verifies download integrity; it
-is not a code signature. The console currently uses mainly Chinese labels.
-The English guide does not imply an English interface. Demo data is synthetic.
+is not a code signature. Use -English for English labels and -Language for the eight official basic-info languages. Demo data is synthetic.
 
 ## Privacy and limits
 
-- IPs are masked by default. Assembled reports are not uploaded, but contacted
+- IPs are masked by default. Assembled reports are uploaded only with -AllowOnlineReport; contacted
   services can observe the tested exit IP.
 - Provider scores are different scales. Geographic registration does not
   establish that an IP is residential or accepted by every service.

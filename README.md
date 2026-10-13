@@ -2,7 +2,7 @@
 
 **在 Windows 上检查代理出口、IP 风险与服务可达性。无需 Docker 或 WSL。**
 
-[English](README_EN.md) · [下载预览版](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.7.1-preview.1) · [完整使用说明](windows/README.md) · [反馈问题](https://github.com/FinalVar/IPQuality/issues/new/choose)
+[English](README_EN.md) · [下载预览版](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.8.0-preview.1) · [完整使用说明](windows/README.md) · [反馈问题](https://github.com/FinalVar/IPQuality/issues/new/choose)
 
 [![Windows tests](https://github.com/FinalVar/IPQuality/actions/workflows/windows-native.yml/badge.svg?branch=windows-native)](https://github.com/FinalVar/IPQuality/actions/workflows/windows-native.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
@@ -15,7 +15,7 @@
 ## 开始使用
 
 1. 安装 [Microsoft PowerShell 7.2 或更新版本](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows)。
-2. 从[发行页](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.7.1-preview.1)下载 `latest.zip`，解压后双击 `Install.cmd`。不需要管理员权限。
+2. 从[发行页](https://github.com/FinalVar/IPQuality/releases/tag/windows-v0.8.0-preview.1)下载 `latest.zip`，解压后双击 `Install.cmd`。不需要管理员权限。
 3. 重新打开终端，运行：
 
 ```powershell
@@ -46,7 +46,7 @@ pwsh -NoProfile -File .\windows\Show-Demo.ps1
 
 ## 下载与校验
 
-当前版本为 **0.7.1 公开预览版**。发行页提供固定提交打包的源代码 ZIP、
+当前版本为 **0.8.0 公开预览版**。发行页提供固定提交打包的源代码 ZIP、
 `latest.sha256` 和记录版本、提交及文件哈希的 `latest.json`。分支 ZIP 会变化，
 需要复现时使用带版本标签的发行页。
 
@@ -56,7 +56,7 @@ Get-Content .\latest.sha256
 ```
 
 对照两处 SHA-256 后再安装。校验用于核对下载完整性，不等同于代码签名。
-演示使用合成数据。控制台当前主要显示中文，英文文档不代表英文界面。
+演示使用合成数据。使用 -English 可切换英文界面，-Language 支持官方八种基础信息语言。
 
 ## 隐私与验证边界
 
